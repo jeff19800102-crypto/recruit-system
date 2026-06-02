@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>派遣招募績效管理系統</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Microsoft JhengHei',Arial,sans-serif;background:#f1f5f9;font-size:14px;color:#1e293b}
+.top-bar{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:100}
+.top-bar h1{font-size:16px;font-weight:700;color:#1e40af;margin-right:8px;white-space:nowrap}
+.month-picker{display:flex;align-items:center;gap:6px;font-size:13px}
+.month-picker input{padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px}
+.tab-bar{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 20px;display:flex;overflow-x:auto}
+.tab-btn{padding:12px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:#64748b;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s}
+.tab-btn:hover{color:#2563eb}.tab-btn.active{color:#2563eb;border-bottom-color:#2563eb}
+.tab-content{display:none;padding:16px 20px}.tab-content.active{display:block}
+.btn{padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s}
+.btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#16a34a;color:#fff}.btn-success:hover{background:#15803d}
+.btn-warning{background:#d97706;color:#fff}.btn-warning:hover{background:#b45309}
+.btn-danger{background:#dc2626;color:#fff}.btn-danger:hover{background:#b91c1c}
+.btn-outline{background:#fff;color:#374151;border:1px solid #d1d5db}.btn-outline:hover{background:#f9fafb}
+.btn-sm{padding:3px 10px;font-size:12px}
+.section{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:16px;overflow:hidden}
+.section-header{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9}
+.section-title{font-size:14px;font-weight:600;color:#1e293b}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.kpi-card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center}
+.kpi-card .label{font-size:12px;color:#64748b;margin-bottom:6px}
+.kpi-card .value{font-size:22px;font-weight:700;color:#1e40af}
+.kpi-card .sub{font-size:11px;color:#94a3b8;margin-top:4px}
+.kpi-card.red .value{color:#dc2626}.kpi-card.green .value{color:#16a34a}.kpi-card.orange .value{color:#d97706}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:500px}
+th{background:#f8fafc;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;color:#475569;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+th.sortable{cursor:pointer;user-select:none}th.sortable:hover{background:#e0eaff;color:#1e40af}
+.sort-icon{font-size:10px;margin-left:3px;color:#94a3b8}
+td{padding:7px 10px;text-align:center;border-bottom:1px solid #f1f5f9;font-size:13px}
+tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
+.tr-total td{background:#eff6ff;font-weight:600;color:#1e40af}
+.tr-weekend td{color:#94a3b8;background:#fafafa}
+.tr-today td{background:#fefce8;font-weight:600}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-pass{background:#dcfce7;color:#15803d}.badge-fail{background:#fee2e2;color:#dc2626}.badge-wait{background:#fef9c3;color:#b45309}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:12px;padding:24px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{font-size:16px;font-weight:700;margin-bottom:16px;color:#1e293b}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group{display:flex;flex-direction:column;gap:4px}.form-group.full{grid-column:1/-1}
+.form-group label{font-size:12px;font-weight:500;color:#374151}
+.form-group input,.form-group select,.form-group textarea{padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:#2563eb}
+.modal-footer{margin-top:16px;display:flex;gap:8px;justify-content:flex-end}
+.inline-edit{width:100%;padding:3px 6px;border:1px solid #2563eb;border-radius:4px;font-size:13px;text-align:center}
+.text-left{text-align:left!important}
+.flex-gap{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.info-bar{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e40af;margin-bottom:12px}
+.action-btns{display:flex;gap:4px;justify-content:center}
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(255,255,255,.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+/* ===== 登錄頁面 ===== */
+#loginScreen{display:none;position:fixed;inset:0;background:linear-gradient(135deg,#1e40af 0%,#3b82f6 50%,#60a5fa 100%);z-index:10000;align-items:center;justify-content:center;}
+#loginScreen.show{display:flex;}
+.login-card{background:#fff;border-radius:16px;padding:40px 36px;width:360px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+.login-logo{text-align:center;margin-bottom:24px;}
+.login-logo h1{font-size:20px;font-weight:700;color:#1e40af;margin-bottom:4px;}
+.login-logo p{font-size:13px;color:#64748b;}
+.login-form .form-group{margin-bottom:16px;}
+.login-form label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;}
+.login-form input{width:100%;padding:10px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;transition:.15s;}
+.login-form input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1);}
+.login-btn{width:100%;padding:11px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;margin-top:4px;}
+.login-btn:hover{background:#1d4ed8;}
+.login-btn:disabled{background:#93c5fd;cursor:not-allowed;}
+.login-error{background:#fee2e2;color:#dc2626;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none;}
+.login-error.show{display:block;}
+.user-info{display:flex;align-items:center;gap:8px;font-size:12px;color:#475569;margin-left:auto;}
+.user-email{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.btn-logout{padding:4px 12px;font-size:12px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;}
+.btn-logout:hover{background:#fee2e2;color:#dc2626;border-color:#fca5a5;}
+.loading-spinner{width:40px;height:40px;border:4px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sync-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#16a34a;padding:2px 8px;border:1px solid #bbf7d0;border-radius:20px;background:#f0fdf4}
+.sync-badge.syncing{color:#d97706;border-color:#fde68a;background:#fffbeb}
+.staff-tag{display:inline-flex;align-items:center;gap:6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:5px 12px;font-size:13px}
+.staff-tag .role-label{color:#64748b;font-size:11px}
+.staff-tag .remove-btn{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:14px;line-height:1;padding:0 2px}
+.staff-tag .remove-btn:hover{color:#dc2626}
+</style>
+</head>
+<body>
+
+<!-- ===== 登錄畫面 ===== -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">
+      <h1>🏆 派遣招募績效管理系統</h1>
+      <p>請登錄以繼續使用</p>
+    </div>
+    <div id="loginError" class="login-error"></div>
+    <div class="login-form">
+      <div class="form-group">
+        <label>帳號</label>
+        <input type="text" id="loginEmail" placeholder="請輸入帳號" autocomplete="username"
+               onkeydown="if(event.key==='Enter')document.getElementById('loginPassword').focus()">
+      </div>
+      <div class="form-group">
+        <label>密碼</label>
+        <input type="password" id="loginPassword" placeholder="請輸入密碼" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="login-btn" id="loginBtn" onclick="doLogin()">登錄</button>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div style="font-size:14px;color:#475569">雲端資料載入中…</div>
+</div>
+
+<div class="top-bar">
+  <h1>🏆 派遣招募績效管理系統</h1>
+  <div class="month-picker">
+    <label>月份</label>
+    <input type="month" id="monthPicker" onchange="changeMonth(this.value)">
+  </div>
+  <span class="sync-badge" id="syncBadge">☁ 雲端同步</span>
+  <button class="btn btn-success" onclick="exportExcel()">⬇ 匯出 Excel</button>
+  <div class="user-info" id="userInfo" style="display:none">
+    <span>👤</span>
+    <span class="user-email" id="userEmail"></span>
+    <button class="btn-logout" onclick="doLogout()">登出</button>
+  </div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('dashboard',this)">📊 儀表板</button>
+  <button class="tab-btn" onclick="switchTab('clients',this)">📋 客戶需求</button>
+  <button class="tab-btn" onclick="switchTab('phone',this)">📞 電訪記錄</button>
+  <button class="tab-btn" onclick="switchTab('service',this)">👥 招募客服</button>
+  <button class="tab-btn" onclick="switchTab('kpi',this)">💰 KPI獎金</button>
+</div>
+
+<!-- 儀表板 -->
+<div id="tab-dashboard" class="tab-content active">
+  <div class="kpi-grid" id="dashKpi"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="section">
+      <div class="section-header"><span class="section-title">🏢 客戶需求達成狀況</span></div>
+      <div class="table-wrap"><table id="dashClientsTable">
+        <thead><tr><th>客戶</th><th>職缺</th><th>需求</th><th>錄取</th><th>報到</th><th>達成率</th><th>缺口</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+    <div>
+      <div class="section" style="margin-bottom:16px">
+        <div class="section-header"><span class="section-title">📞 電訪績效（上月26～本月25）</span></div>
+        <div class="table-wrap"><table id="dashPhoneTable">
+          <thead><tr><th>指標</th><th>月目標</th><th>今日應達</th><th>實績</th><th>落後量</th><th>達成率</th><th>狀況</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+  <div class="section" style="margin-top:16px">
+    <div class="section-header"><span class="section-title">👥 招募客服人員月績效（當月）</span></div>
+    <div class="table-wrap"><table id="dashStaffTable">
+      <thead><tr><th>人員</th><th>初試</th><th>通過初試</th><th>安排複試</th><th>錄取（全程）</th><th>轉掛報到</th><th>報到（全程）</th><th>通過率</th><th>電訪來源</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- 客戶需求 -->
+<div id="tab-clients" class="tab-content">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">📋 客戶人力需求管理</span>
+      <div class="flex-gap">
+        <button class="btn btn-outline btn-sm" onclick="importLastMonthClients()">📥 帶入上月資料</button>
+        <button class="btn btn-primary btn-sm" onclick="openClientModal()">＋ 新增需求</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th class="sortable" onclick="sortClients('type')">類型<span class="sort-icon" id="si-type">⇅</span></th>
+        <th class="sortable" onclick="sortClients('direct')">全程/轉掛<span class="sort-icon" id="si-direct">⇅</span></th>
+        <th class="sortable" onclick="sortClients('clientName')">客戶名稱<span class="sort-icon" id="si-clientName">⇅</span></th>
+        <th class="sortable" onclick="sortClients('position')">職缺名稱<span class="sort-icon" id="si-position">⇅</span></th>
+        <th class="sortable" onclick="sortClients('required')">需求<span class="sort-icon" id="si-required">⇅</span></th>
+        <th>本月錄取</th><th>本月報到</th>
+        <th class="sortable" onclick="sortClients('profitPerPerson')">每名利潤<span class="sort-icon" id="si-profitPerPerson">⇅</span></th>
+        <th class="sortable" onclick="sortClients('level')">等級<span class="sort-icon" id="si-level">⇅</span></th>
+        <th class="sortable" onclick="sortClients('nature')">職缺性質<span class="sort-icon" id="si-nature">⇅</span></th>
+        <th class="sortable" onclick="sortClients('profitEstimate')">利潤預估<span class="sort-icon" id="si-profitEstimate">⇅</span></th>
+        <th class="sortable" onclick="sortClients('targetCount')">目標人數<span class="sort-icon" id="si-targetCount">⇅</span></th>
+        <th class="sortable" onclick="sortClients('targetAmount')">目標金額<span class="sort-icon" id="si-targetAmount">⇅</span></th>
+        <th>缺口</th><th>已實現利潤</th><th>操作</th>
+      </tr></thead>
+      <tbody id="clientsBody"></tbody>
+      <tfoot><tr class="tr-total" id="clientsFooter"></tr></tfoot>
+    </table></div>
+  </div>
+</div>
+
+<!-- 電訪記錄 -->
+<div id="tab-phone" class="tab-content">
+  <div class="info-bar">💡 統計週期為<strong>上月26日～本月25日</strong>。每位電訪人員各自填寫每日電訪量、接通數、約訪成功數。未接/拒接自動計算，週末顯示為休假日。</div>
+  <!-- 動態產生每人區塊 -->
+  <div id="phoneStaffSections"></div>
+</div>
+
+<!-- 招募客服 -->
+<div id="tab-service" class="tab-content">
+  <div class="info-bar" id="serviceInfoBar">💡 統計週期與電訪相同：<strong>上月26日 ～ 本月25日</strong>。面試記錄只顯示此週期內的資料，上月26日後的記錄標示「上月」。月績效彙總依相同週期統計。</div>
+  <!-- 客服人員管理 -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">👤 客服人員管理</span>
+      <button class="btn btn-primary btn-sm" onclick="addServiceStaff()">＋ 新增人員</button>
+    </div>
+    <div id="serviceStaffList" style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;min-height:44px;align-items:center">
+      <span style="color:#94a3b8;font-size:12px">載入中…</span>
+    </div>
+  </div>
+  <!-- 面試記錄 -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">📝 面試記錄</span>
+      <button class="btn btn-primary btn-sm" onclick="openServiceModal()">＋ 新增記錄</button>
+    </div>
+    <div class="table-wrap"><table id="serviceTable">
+      <thead><tr>
+        <th class="sortable" onclick="sortService('date')">日期<span class="sort-icon" id="ssi-date">▼</span></th>
+        <th class="sortable" onclick="sortService('staffName')">客服人員<span class="sort-icon" id="ssi-staffName">⇅</span></th>
+        <th class="sortable" onclick="sortService('candidateName')">求職者<span class="sort-icon" id="ssi-candidateName">⇅</span></th>
+        <th class="sortable" onclick="sortService('position')">應徵職位<span class="sort-icon" id="ssi-position">⇅</span></th>
+        <th class="sortable" onclick="sortService('clientName')">客戶<span class="sort-icon" id="ssi-clientName">⇅</span></th>
+        <th class="sortable" onclick="sortService('firstResult')">初試結果<span class="sort-icon" id="ssi-firstResult">⇅</span></th>
+        <th class="sortable" onclick="sortService('arrangeSecond')">安排複試<span class="sort-icon" id="ssi-arrangeSecond">⇅</span></th>
+        <th class="sortable" onclick="sortService('hireResult')">錄取結果<span class="sort-icon" id="ssi-hireResult">⇅</span></th>
+        <th class="sortable" onclick="sortService('hireDate')">錄取確認日期<span class="sort-icon" id="ssi-hireDate">⇅</span></th>
+        <th class="sortable" onclick="sortService('reportDate')">報到日期<span class="sort-icon" id="ssi-reportDate">⇅</span></th>
+        <th class="sortable" onclick="sortService('source')">來源<span class="sort-icon" id="ssi-source">⇅</span></th>
+        <th>備註</th><th>操作</th>
+      </tr></thead>
+      <tbody id="serviceBody"></tbody>
+    </table></div>
+  </div>
+  <!-- 月績效彙總 -->
+  <div class="section" style="margin-top:16px">
+    <div class="section-header"><span class="section-title">📊 月績效彙總（當月）</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>人員</th><th>初試數</th><th>通過初試</th><th>安排複試</th><th>錄取數（全程）</th><th>轉掛報到▲</th><th>報到數★</th><th>初試通過率</th><th>來源-電訪</th><th>來源-自投</th><th>來源-其他</th></tr></thead>
+      <tbody id="serviceSummaryBody"></tbody>
+      <tfoot><tr class="tr-total" id="serviceSummaryFooter"></tr></tfoot>
+    </table></div>
+    <div style="padding:8px 16px;font-size:11px;color:#64748b">★ 報到數（全程）以報到日期統計，上月面試本月報到者亦計入　▲ 轉掛報到數計入KPI輔助獎金（轉掛客戶的報到不計入主KPI）</div>
+  </div>
+</div>
+
+<!-- KPI獎金 -->
+<div id="tab-kpi" class="tab-content">
+  <div class="section">
+    <div class="section-header"><span class="section-title">⚙️ 獎金設定</span></div>
+    <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+      <div class="form-group"><label>本月招募獎金總額（元）</label><input type="number" id="kpiTotalBonus" value="10000" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>電訪月目標－電訪量</label><input type="number" id="kpiTargetCall" value="1000" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>電訪月目標－接通數</label><input type="number" id="kpiTargetConnect" value="450" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>電訪月目標－約訪成功</label><input type="number" id="kpiTargetAppoint" value="48" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>RPO 履歷蒐集目標</label><input type="number" id="kpiTargetResume" value="400" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>RPO 履歷實際蒐集量</label><input type="number" id="kpiActualResume" value="0" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>客服月目標－初試人數</label><input type="number" id="kpiTargetFirst" value="5" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>客服月目標－錄取人數</label><input type="number" id="kpiTargetHire" value="4" oninput="saveData();renderKPI()"></div>
+      <div class="form-group"><label>客服月目標－報到人數</label><input type="number" id="kpiTargetReport" value="4" oninput="saveData();renderKPI()"></div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px" id="kpiCards"></div>
+  <div class="section" style="margin-top:16px">
+    <div class="section-header"><span class="section-title">👥 人員設定與獎金分配</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>人員</th><th>角色</th><th>份額比例</th><th>分配金額</th><th>輔助獎金類型</th><th>輔助上限</th><th>主KPI上限</th><th>本月合計</th><th>操作</th></tr></thead>
+      <tbody id="kpiStaffBody"></tbody>
+    </table></div>
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="addKPIStaff('phone')">＋ 新增電訪人員</button>
+      <button class="btn btn-outline btn-sm" onclick="addKPIStaff('service')">＋ 新增客服人員</button>
+      <span id="kpiShareTotal" style="font-size:12px;color:#64748b"></span>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENT MODAL -->
+<div class="modal-bg" id="clientModal">
+  <div class="modal">
+    <h2 id="clientModalTitle">新增客戶需求</h2>
+    <input type="hidden" id="clientEditId">
+    <div class="form-grid">
+      <div class="form-group"><label>類型</label><select id="cType"><option>派遣</option><option>代徵</option></select></div>
+      <div class="form-group"><label>全程/轉掛</label><select id="cDirect"><option>全程</option><option>轉掛</option></select></div>
+      <div class="form-group"><label>客戶名稱</label><input id="cName" type="text" placeholder="例：美光"></div>
+      <div class="form-group"><label>職缺名稱</label><input id="cPosition" type="text" placeholder="例：技術員"></div>
+      <div class="form-group"><label>職缺人數</label><input id="cRequired" type="number" value="1" min="0" oninput="calcProfitEstimate()"></div>
+      <div class="form-group"><label>每名利潤（元）</label><input id="cProfit" type="number" value="0" min="0" oninput="calcProfitEstimate();calcTargetAmount()"></div>
+      <div class="form-group"><label>利潤預估（元）<span style="font-size:10px;color:#94a3b8;margin-left:4px">職缺人數×每名利潤</span></label><input id="cProfitEstimate" type="number" value="0" readonly style="background:#f8fafc;color:#64748b;cursor:not-allowed"></div>
+      <div class="form-group"><label>招募等級</label><select id="cLevel"><option>甲</option><option>乙</option><option>丙</option></select></div>
+      <div class="form-group"><label>職缺性質</label><select id="cNature"><option>長派</option><option>長派轉正</option><option>代徵</option><option>短期</option></select></div>
+      <div class="form-group"><label>本月目標人數</label><input id="cTargetCount" type="number" value="0" min="0" oninput="calcTargetAmount()"></div>
+      <div class="form-group"><label>本月目標金額（元）<span style="font-size:10px;color:#94a3b8;margin-left:4px">目標人數×每名利潤</span></label><input id="cTargetAmount" type="number" value="0" min="0" readonly style="background:#f8fafc;color:#64748b;cursor:not-allowed"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('clientModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveClient()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- SERVICE MODAL -->
+<div class="modal-bg" id="serviceModal">
+  <div class="modal">
+    <h2 id="serviceModalTitle">新增面試記錄</h2>
+    <input type="hidden" id="serviceEditId">
+    <div class="form-grid">
+      <div class="form-group"><label>面試日期</label><input id="sDate" type="date"></div>
+      <div class="form-group"><label>客服人員</label><select id="sStaff"><option value="">請選擇</option></select></div>
+      <div class="form-group"><label>求職者姓名</label><input id="sCandidate" type="text" placeholder="姓名"></div>
+      <div class="form-group"><label>客戶名稱</label><select id="sClient" onchange="onClientChange()"><option value="">請選擇</option></select></div>
+      <div class="form-group"><label>應徵職位</label><select id="sPosition"><option value="">請選擇</option></select></div>
+      <div class="form-group"><label>來源</label><select id="sSource"><option>電訪</option><option>自行投遞</option><option>其他</option></select></div>
+      <div class="form-group"><label>初試結果</label><select id="sFirstResult"><option value="">待定</option><option>通過</option><option>未通過</option></select></div>
+      <div class="form-group"><label>安排複試</label><select id="sSecond"><option value="">—</option><option>已安排</option><option>未安排</option></select></div>
+      <div class="form-group"><label>錄取結果</label><select id="sHireResult"><option value="">待定</option><option>錄取</option><option>未錄取</option></select></div>
+      <div class="form-group"><label>錄取確認日期<span style="font-size:10px;color:#94a3b8;margin-left:4px">跨月時填寫，作為KPI計算基準</span></label><input id="sHireDate" type="date"></div>
+      <div class="form-group"><label>報到日期</label><input id="sReportDate" type="date"></div>
+      <div class="form-group full"><label>備註</label><textarea id="sNote" rows="2" style="resize:vertical"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('serviceModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveService()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== Firebase =====
+const firebaseConfig={
+  apiKey:"AIzaSyCCpbE0XKM-5Oz4NYhPzhqHh7UuYCh5Cvg",
+  authDomain:"recruit-system-904ba.firebaseapp.com",
+  projectId:"recruit-system-904ba",
+  storageBucket:"recruit-system-904ba.firebasestorage.app",
+  messagingSenderId:"744257186789",
+  appId:"1:744257186789:web:00cb7069a30903a3521d0c"
+};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.firestore();
+const auth=firebase.auth();
+
+// ===== 狀態（需在 Auth 監聽前宣告）=====
+const _now=new Date();
+let currentMonth=`${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}`;
+let data={}, _unsubscribe=null, _saveTimer=null;
+let clientSortField=null, clientSortAsc=true;
+let serviceSortField='date', serviceSortAsc=false;
+const PRESET={};
+let _absorbing=false;
+let currentPhoneStaff=localStorage.getItem('phoneCurrentStaff')||null;
+let crossMonthServiceRecords=[];
+
+// ===== 登錄 / 登出 =====
+function doLogin(){
+  const username=document.getElementById('loginEmail').value.trim().toLowerCase();
+  const password=document.getElementById('loginPassword').value;
+  const errEl=document.getElementById('loginError');
+  const btn=document.getElementById('loginBtn');
+  errEl.classList.remove('show');
+  if(!username||!password){errEl.textContent='請輸入帳號與密碼';errEl.classList.add('show');return;}
+  // ★ 自訂帳號：自動補上網域，使用者只需輸入帳號名稱
+  const email=username+'@recruit.app';
+  btn.disabled=true; btn.textContent='登錄中…';
+  auth.signInWithEmailAndPassword(email,password)
+    .catch(err=>{
+      let msg='登錄失敗，請確認帳號密碼';
+      if(err.code==='auth/user-not-found'||err.code==='auth/wrong-password'||err.code==='auth/invalid-credential') msg='帳號或密碼錯誤';
+      else if(err.code==='auth/too-many-requests') msg='登錄失敗次數過多，請稍後再試';
+      errEl.textContent=msg; errEl.classList.add('show');
+      btn.disabled=false; btn.textContent='登錄';
+    });
+}
+
+function doLogout(){
+  if(!confirm('確定要登出嗎？'))return;
+  auth.signOut();
+}
+
+// ===== Auth 狀態監聽：登錄後才顯示主畫面 =====
+auth.onAuthStateChanged(user=>{
+  if(user){
+    // 已登錄 → 隱藏登錄畫面，顯示主系統
+    document.getElementById('loginScreen').classList.remove('show');
+    document.getElementById('userEmail').textContent=user.email.replace('@recruit.app','');
+    document.getElementById('userInfo').style.display='flex';
+    document.getElementById('loginPassword').value='';
+    loadData();
+  } else {
+    // 未登錄 → 顯示登錄畫面，隱藏主系統
+    document.getElementById('loginScreen').classList.add('show');
+    document.getElementById('userInfo').style.display='none';
+    if(_unsubscribe){_unsubscribe();_unsubscribe=null;}
+  }
+});
+
+// ===== 月份選擇器初始化 =====
+document.getElementById('monthPicker').value=currentMonth;
+
+// ===== Firestore =====
+function getDocRef(){return db.collection('months').doc(currentMonth);}
+function showLoading(v){document.getElementById('loadingOverlay').style.display=v?'flex':'none';}
+function setSyncBadge(syncing){
+  const b=document.getElementById('syncBadge');
+  if(syncing){b.className='sync-badge syncing';b.textContent='⟳ 同步中…';}
+  else{b.className='sync-badge';b.textContent='☁ 雲端同步';}
+}
+
+// ★ 讀取上月 Firestore，載入與「本服務週期」有關的面試記錄
+//   涵蓋兩種情境：
+//   ① 面試日期 >= 上月26日（屬於本服務週期的面試）
+//   ② 面試日期 < 上月26日，但報到日期落在本服務週期（跨週期報到）
+async function loadCrossMonthData(){
+  const [y,m]=currentMonth.split('-').map(Number);
+  crossMonthServiceRecords=[];
+  const seen=new Set();
+
+  // ★ 往回查最多 4 個月，涵蓋跨月報到的所有情境
+  //   例如 4 月面試、6 月報到 → 查看 6 月時需回溯至 4 月文件
+  for(let i=1;i<=4;i++){
+    let ty=y, tm=m-i;
+    while(tm<=0){tm+=12;ty--;}
+    const mStr=`${ty}-${String(tm).padStart(2,'0')}`;
+    const mStr26=`${mStr}-26`;
+    try{
+      const doc=await db.collection('months').doc(mStr).get();
+      if(!doc.exists) continue;
+      const recs=(doc.data().serviceRecords||[]).filter(r=>{
+        if(i===1){
+          // 上個月：① 面試日期在本服務週期內 ② 報到/錄取確認日期在本服務週期內
+          return (r.date&&r.date>=mStr26)||
+                 (r.reportDate&&inServicePeriod(r.reportDate))||
+                 (r.hireDate&&inServicePeriod(r.hireDate));
+        } else {
+          // 2~4 個月前：僅抓報到日期或錄取確認日期落在本服務週期的記錄
+          // （面試日期不可能落在本服務週期，不需額外判斷）
+          return (r.reportDate&&inServicePeriod(r.reportDate))||
+                 (r.hireDate&&inServicePeriod(r.hireDate));
+        }
+      });
+      // 去重：以「面試日期 + 求職者姓名」為唯一鍵
+      recs.forEach(r=>{
+        const k=`${r.date}|${r.candidateName||''}`;
+        if(!seen.has(k)){ seen.add(k); crossMonthServiceRecords.push(r); }
+      });
+    }catch(e){ console.error(`跨週期資料載入失敗(${mStr}):`,e); }
+  }
+}
+
+// ★ 自動整合：將「面試日期屬於本服務週期」的跨月記錄合併進本月文件
+//   整合後 crossMonthServiceRecords 只保留「面試在週期前、報到日在週期內」的純報到記錄
+async function absorbCrossRecords(){
+  // 找出面試日期確實在本服務週期內的跨月記錄
+  const toAbsorb=crossMonthServiceRecords.filter(r=>r.date&&inServicePeriod(r.date));
+  // 無論是否要吸收，都先將服務週期內的記錄移出 crossMonthServiceRecords
+  crossMonthServiceRecords=crossMonthServiceRecords.filter(r=>!r.date||!inServicePeriod(r.date));
+  if(toAbsorb.length===0) return;
+
+  // 去重：以「日期 + 求職者姓名」為 key
+  const existing=new Set((data.serviceRecords||[]).map(r=>`${r.date}|${r.candidateName||''}`));
+  const newRecs=toAbsorb.filter(r=>!existing.has(`${r.date}|${r.candidateName||''}`));
+  if(newRecs.length===0) return;
+
+  data.serviceRecords=[...(data.serviceRecords||[]),...newRecs];
+  _absorbing=true;
+  try{
+    await getDocRef().set(data);
+    // ★ 同步從上月文件刪除已整合的記錄，防止使用者刪除後重新出現
+    const [y,m]=currentMonth.split('-').map(Number);
+    const py=m===1?y-1:y, pm=m===1?12:m-1;
+    const prevMonthStr=`${py}-${String(pm).padStart(2,'0')}`;
+    const prevDoc=await db.collection('months').doc(prevMonthStr).get();
+    if(prevDoc.exists){
+      const prevData=prevDoc.data();
+      const absorbedKeys=new Set(newRecs.map(r=>`${r.date}|${r.candidateName||''}`));
+      const remaining=(prevData.serviceRecords||[]).filter(r=>!absorbedKeys.has(`${r.date}|${r.candidateName||''}`));
+      if(remaining.length!==(prevData.serviceRecords||[]).length){
+        await db.collection('months').doc(prevMonthStr).set({...prevData,serviceRecords:remaining});
+      }
+    }
+    console.log(`✅ 已將 ${newRecs.length} 筆跨週期面試記錄整合至本月文件，並從上月文件移除`);
+  }catch(e){ console.error('整合失敗:',e); }
+  finally{ _absorbing=false; }
+}
+
+// ★ 舊版電訪記錄格式遷移（flat {date:...} → {staffName:{date:...}}）
+function migratePhoneRecords(){
+  const pr=data.phoneRecords;
+  if(!pr||typeof pr!=='object') return;
+  const keys=Object.keys(pr);
+  if(keys.length===0) return;
+  // 判斷是否為舊格式：key 為日期字串 YYYY-MM-DD
+  if(keys.some(k=>/^\d{4}-\d{2}-\d{2}$/.test(k))){
+    const phoneStaff=getPhoneStaff();
+    const staffName=phoneStaff.length>0?phoneStaff[0].name:(data.phoneStaffName||'彭文慧');
+    console.log('⚡ 電訪記錄格式遷移 →', staffName);
+    data.phoneRecords={[staffName]:{...pr}};
+    delete data.phoneStaffName;
+    getDocRef().set(data).catch(e=>console.error('遷移儲存失敗:',e));
+  }
+}
+
+// ★ 自動修正：將本月文件中面試日期不屬於本服務週期的記錄，移回正確月份文件
+async function relocateOrphanRecords(){
+  const recs=data.serviceRecords||[];
+  // 找出面試日期有值、但不屬於本服務週期的記錄
+  const orphans=recs.map((r,i)=>({...r,_idx:i})).filter(r=>r.date&&!inServicePeriod(r.date));
+  if(orphans.length===0) return;
+
+  // 依目標月份分組
+  const byMonth={};
+  orphans.forEach(r=>{
+    const tm=getServiceMonthForDate(r.date);
+    if(tm&&tm!==currentMonth){
+      if(!byMonth[tm]) byMonth[tm]=[];
+      byMonth[tm].push(r);
+    }
+  });
+  if(Object.keys(byMonth).length===0) return;
+
+  // 從本月文件移除這些記錄
+  const removeIdxs=new Set(orphans.map(r=>r._idx));
+  data.serviceRecords=data.serviceRecords.filter((_,i)=>!removeIdxs.has(i));
+
+  _absorbing=true;
+  try{
+    await getDocRef().set(data);
+    // 逐月寫入目標文件（去重）
+    for(const [tm,records] of Object.entries(byMonth)){
+      const tdoc=await db.collection('months').doc(tm).get();
+      const tdata=tdoc.exists?tdoc.data():defaultData();
+      if(!tdata.serviceRecords) tdata.serviceRecords=[];
+      const existKeys=new Set(tdata.serviceRecords.map(r=>`${r.date}|${r.candidateName||''}`));
+      const newRecs=records
+        .filter(r=>!existKeys.has(`${r.date}|${r.candidateName||''}`))
+        .map(({_idx,...r})=>r); // 移除暫用的 _idx
+      if(newRecs.length>0){
+        tdata.serviceRecords=[...tdata.serviceRecords,...newRecs];
+        await db.collection('months').doc(tm).set(tdata);
+        console.log(`✅ 已將 ${newRecs.length} 筆錯置記錄移至 ${tm}`);
+      }
+    }
+  }catch(e){ console.error('記錄重新定位失敗:',e); }
+  finally{ _absorbing=false; }
+}
+
+function loadData(){
+  if(_unsubscribe) _unsubscribe();
+  showLoading(true);
+  crossMonthServiceRecords=[];
+  _unsubscribe=getDocRef().onSnapshot(async doc=>{
+    if(_absorbing) return; // ★ 整合寫入觸發的 snapshot，直接略過
+    if(doc.exists){data=doc.data();}
+    else if(PRESET[currentMonth]){
+      data=JSON.parse(JSON.stringify(PRESET[currentMonth]));
+      getDocRef().set(data).catch(e=>console.error('PRESET遷移失敗:',e));
+    } else {data=defaultData();}
+    syncUIFromData();
+    migratePhoneRecords();       // ★ 舊電訪格式遷移
+    validatePhoneStaffMemory();  // ★ 校驗裝置記憶
+    await loadCrossMonthData();
+    await absorbCrossRecords();      // ★ 自動整合跨週期面試記錄至本月
+    await relocateOrphanRecords();   // ★ 自動修正存錯月份的記錄
+    renderAll(); showLoading(false); setSyncBadge(false);
+  },err=>{
+    console.error('Firestore error:',err); showLoading(false); setSyncBadge(false);
+    alert('無法連線至雲端資料庫，請確認網路狀態後重新整理。');
+  });
+}
+
+function saveData(){
+  syncDataFromUI(); renderAll(); setSyncBadge(true);
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>{
+    getDocRef().set(data).then(()=>setSyncBadge(false)).catch(err=>{console.error(err);setSyncBadge(false);alert('儲存失敗，請確認網路狀態。');});
+  },400);
+}
+
+// ===== 預設資料 =====
+function defaultData(){
+  return {
+    clients:[],phoneRecords:{},serviceRecords:[],
+    kpi:{totalBonus:10000,targetCall:1000,targetConnect:450,targetAppoint:48,
+      targetResume:400,actualResume:0,targetFirst:5,targetHire:4,targetReport:4,
+      staff:[
+        {name:'彭文慧',role:'電訪開發',share:0.3,auxType:'RPO報表完成獎金',auxLimit:300,transferCount:0},
+        {name:'賴明瑩',role:'電訪支援',share:0.1,auxType:'彈性獎金',auxLimit:500,manualBonus:0,transferCount:0},
+        {name:'劉湘君',role:'招募客服A',share:0.3,auxType:'轉掛業務分層獎金',auxLimit:500,transferCount:0},
+        {name:'林宛欣',role:'招募客服B',share:0.3,auxType:'轉掛業務分層獎金',auxLimit:500,transferCount:0}
+      ]}
+  };
+}
+
+function syncDataFromUI(){
+  const k=data.kpi||{};
+  k.totalBonus=+document.getElementById('kpiTotalBonus').value||10000;
+  k.targetCall=+document.getElementById('kpiTargetCall').value||1000;
+  k.targetConnect=+document.getElementById('kpiTargetConnect').value||450;
+  k.targetAppoint=+document.getElementById('kpiTargetAppoint').value||48;
+  k.targetResume=+document.getElementById('kpiTargetResume').value||400;
+  k.actualResume=+document.getElementById('kpiActualResume').value||0;
+  k.targetFirst=+document.getElementById('kpiTargetFirst').value||5;
+  k.targetHire=+document.getElementById('kpiTargetHire').value||4;
+  k.targetReport=+document.getElementById('kpiTargetReport').value||4;
+}
+
+function syncUIFromData(){
+  const k=data.kpi||{};
+  document.getElementById('kpiTotalBonus').value=k.totalBonus||10000;
+  document.getElementById('kpiTargetCall').value=k.targetCall||1000;
+  document.getElementById('kpiTargetConnect').value=k.targetConnect||450;
+  document.getElementById('kpiTargetAppoint').value=k.targetAppoint||48;
+  document.getElementById('kpiTargetResume').value=k.targetResume||400;
+  document.getElementById('kpiActualResume').value=k.actualResume||0;
+  document.getElementById('kpiTargetFirst').value=k.targetFirst||5;
+  document.getElementById('kpiTargetHire').value=k.targetHire||4;
+  document.getElementById('kpiTargetReport').value=k.targetReport||4;
+}
+
+// ===== 月份 =====
+function changeMonth(val){currentMonth=val;clientSortField=null;clientSortAsc=true;serviceSortField='date';serviceSortAsc=false;loadData();}
+
+// ===== 人員分類輔助 =====
+// 電訪人員：角色含「電訪」（包括 電訪開發、電訪支援）
+function getPhoneStaff(){return(data.kpi?.staff||[]).filter(s=>s.role&&s.role.includes('電訪'));}
+// 客服人員：角色不含「電訪」
+function getServiceStaffList(){return(data.kpi?.staff||[]).filter(s=>!s.role||!s.role.includes('電訪'));}
+// 客服人員姓名（供面試記錄 Modal 下拉選單）
+function getKPIStaffNames(){return getServiceStaffList().map(s=>s.name);}
+
+// ===== 電訪週期 =====
+function getPhoneRangeDates(){
+  const [y,m]=currentMonth.split('-').map(Number);
+  const py=m===1?y-1:y,pm=m===1?12:m-1;
+  const wdays=['日','一','二','三','四','五','六'];
+  const dates=[];
+  const lastDay=new Date(y,pm,0).getDate();
+  for(let d=26;d<=lastDay;d++){
+    const dt=new Date(py,pm-1,d);
+    dates.push({date:`${py}-${String(pm).padStart(2,'0')}-${String(d).padStart(2,'0')}`,wd:wdays[dt.getDay()],isWeekend:dt.getDay()===0||dt.getDay()===6});
+  }
+  for(let d=1;d<=25;d++){
+    const dt=new Date(y,m-1,d);
+    dates.push({date:`${currentMonth}-${String(d).padStart(2,'0')}`,wd:wdays[dt.getDay()],isWeekend:dt.getDay()===0||dt.getDay()===6});
+  }
+  return dates;
+}
+
+function getPhoneProgress(){
+  const range=getPhoneRangeDates();
+  const todayStr=new Date().toISOString().slice(0,10);
+  const workDays=range.filter(x=>!x.isWeekend);
+  const passed=workDays.filter(x=>x.date<=todayStr).length;
+  return workDays.length>0?passed/workDays.length:0;
+}
+
+// 單一電訪人員的統計
+function getPhoneTotalsForStaff(staffName){
+  const recs=((data.phoneRecords||{})[staffName])||{};
+  let call=0,conn=0,appt=0;
+  getPhoneRangeDates().forEach(({date,isWeekend})=>{
+    if(isWeekend)return;
+    const r=recs[date]||{};
+    call+=r.callCount||0;conn+=r.connected||0;appt+=r.appointSuccess||0;
+  });
+  return{call,conn,appt,rejected:call-conn,rate:call>0?appt/call:0};
+}
+
+// 全體電訪人員加總
+function getPhoneTotals(){
+  let call=0,conn=0,appt=0;
+  getPhoneStaff().forEach(s=>{
+    const t=getPhoneTotalsForStaff(s.name);
+    call+=t.call;conn+=t.conn;appt+=t.appt;
+  });
+  return{call,conn,appt,rejected:call-conn,rate:call>0?appt/call:0};
+}
+
+function inCurrentMonth(dateStr){return !!(dateStr&&dateStr.startsWith(currentMonth));}
+
+// ★ 判斷日期是否屬於「本服務週期」：上月26日 ～ 本月25日（與電訪週期相同）
+function inServicePeriod(dateStr){
+  if(!dateStr) return false;
+  const [y,m]=currentMonth.split('-').map(Number);
+  const py=m===1?y-1:y, pm=m===1?12:m-1;
+  const start=`${py}-${String(pm).padStart(2,'0')}-26`;
+  const end=`${currentMonth}-25`;
+  return dateStr>=start && dateStr<=end;
+}
+// 取得服務週期文字（顯示用）
+function getServicePeriodLabel(){
+  const [y,m]=currentMonth.split('-').map(Number);
+  const py=m===1?y-1:y, pm=m===1?12:m-1;
+  return `${py}年${pm}月26日 ～ ${y}年${m}月25日`;
+}
+
+function getWeeks(){
+  const [y,m]=currentMonth.split('-').map(Number);
+  const py=m===1?y-1:y, pm=m===1?12:m-1;
+  const prevMonthStr=`${py}-${String(pm).padStart(2,'0')}`;
+  const lastDayPrev=new Date(y,pm,0).getDate(); // 上月最後一天
+
+  // 服務週期內的所有記錄（本月文件 + 跨週期記錄）
+  const allRecs=[...(data.serviceRecords||[]),...crossMonthServiceRecords];
+
+  // 第0週：上月26日 ～ 上月底
+  const wk0Days=[];
+  for(let d=26;d<=lastDayPrev;d++) wk0Days.push(`${prevMonthStr}-${String(d).padStart(2,'0')}`);
+  const wk0={label:'上月底',dates:`上月26日～${lastDayPrev}日`,startDates:wk0Days};
+
+  // 第1~4週：本月1日～25日
+  const weeks=[
+    {label:'第1週',startDay:1,endDay:7},
+    {label:'第2週',startDay:8,endDay:14},
+    {label:'第3週',startDay:15,endDay:21},
+    {label:'第4週',startDay:22,endDay:25}
+  ];
+
+  const buildWkDates=(wk)=>({
+    ...wk,
+    dates:`${wk.startDay}～${wk.endDay}日`,
+    interview:allRecs.filter(r=>inServicePeriod(r.date)&&inCurrentMonth(r.date)&&parseInt(r.date.split('-')[2])>=wk.startDay&&parseInt(r.date.split('-')[2])<=wk.endDay).length,
+    hire:allRecs.filter(r=>inServicePeriod(r.date)&&inCurrentMonth(r.date)&&parseInt(r.date.split('-')[2])>=wk.startDay&&parseInt(r.date.split('-')[2])<=wk.endDay&&r.hireResult==='錄取').length,
+    report:allRecs.filter(r=>r.reportDate&&inServicePeriod(r.reportDate)&&inCurrentMonth(r.reportDate)&&parseInt(r.reportDate.split('-')[2])>=wk.startDay&&parseInt(r.reportDate.split('-')[2])<=wk.endDay).length
+  });
+
+  // 上月底週
+  const wk0Result={
+    label:wk0.label, dates:wk0.dates,
+    interview:allRecs.filter(r=>inServicePeriod(r.date)&&wk0Days.includes(r.date)).length,
+    hire:allRecs.filter(r=>inServicePeriod(r.date)&&wk0Days.includes(r.date)&&r.hireResult==='錄取').length,
+    report:allRecs.filter(r=>r.reportDate&&inServicePeriod(r.reportDate)&&wk0Days.includes(r.reportDate)).length
+  };
+
+  return [wk0Result,...weeks.map(buildWkDates)];
+}
+
+// ★ 判斷客戶是否為「轉掛」類型
+function isTransferClient(clientName,position){
+  const c=(data.clients||[]).find(c=>c.clientName===clientName&&c.position===position);
+  return c&&c.direct==='轉掛';
+}
+
+// ===== 月績效彙總統計（服務週期：上月26日～本月25日）=====
+function getServiceStats(){
+  const recs=data.serviceRecords||[];
+  const stats={};
+  const ensureStaff=n=>{
+    if(!stats[n])stats[n]={first:0,passFirst:0,second:0,hire:0,transferReport:0,report:0,srcPhone:0,srcSelf:0,srcOther:0};
+    return stats[n];
+  };
+
+  // 統計本月 Firestore 文件中屬於本服務週期的記錄
+  const countRec=(r)=>{
+    if(!r.staffName)return;
+    const s=ensureStaff(r.staffName);
+    const isTransfer=isTransferClient(r.clientName,r.position);
+    if(inServicePeriod(r.date)&&!isTransfer){
+      // 全程客戶：初試、通過、複試、來源統計依面試日期計入主KPI
+      s.first++;
+      if(r.firstResult==='通過')s.passFirst++;
+      if(r.arrangeSecond==='已安排')s.second++;
+      if(r.source==='電訪')s.srcPhone++;
+      else if(r.source==='自行投遞')s.srcSelf++;
+      else if(r.source)s.srcOther++;
+    }
+    // ★ 錄取：依「錄取確認日期」（有填）或「面試日期」（未填）判斷所屬週期
+    const hireDateForKPI=r.hireDate||r.date;
+    if(r.hireResult==='錄取'&&inServicePeriod(hireDateForKPI)&&!isTransfer) s.hire++;
+    if(r.reportDate&&inServicePeriod(r.reportDate)){
+      if(isTransfer) s.transferReport++; // 轉掛：僅報到計入轉掛件數
+      else           s.report++;         // 全程：報到計入主KPI
+    }
+  };
+
+  recs.forEach(countRec);
+  // ★ 上月26日以後的面試記錄（屬於本服務週期，但存在上月文件）
+  crossMonthServiceRecords.forEach(countRec);
+
+  return stats;
+}
+
+function getClientServiceStats(){
+  const cs={};
+  const ensureClient=key=>{if(!cs[key])cs[key]={hire:0,report:0};return cs[key];};
+
+  const countRec=(r)=>{
+    const key=(r.clientName||'')+'||'+(r.position||'');
+    const c=ensureClient(key);
+    // ★ 錄取依確認日期（有填）或面試日期（未填）
+    if(r.hireResult==='錄取'&&inServicePeriod(r.hireDate||r.date))c.hire++;
+    if(r.reportDate&&inServicePeriod(r.reportDate))c.report++;
+  };
+
+  (data.serviceRecords||[]).forEach(countRec);
+  // ★ 上月26日以後的面試記錄
+  crossMonthServiceRecords.forEach(countRec);
+
+  return cs;
+}
+
+function getClientTotals(){
+  const cStats=getClientServiceStats();
+  let req=0,hire=0,rep=0,gap=0,profit=0,targetCount=0,targetAmount=0,realized=0;
+  (data.clients||[]).forEach(c=>{
+    const key=(c.clientName||'')+'||'+(c.position||'');
+    const cs=cStats[key]||{hire:0,report:0};
+    const cReq=+c.required||0;
+    req+=cReq;hire+=cs.hire;rep+=cs.report;
+    // ★ 缺口：各客戶個別計算後加總，避免超額客戶抵銷其他客戶缺口
+    if(cReq>0) gap+=Math.max(0,cReq-cs.report);
+    profit+=+c.profitEstimate||0;targetCount+=+c.targetCount||0;targetAmount+=+c.targetAmount||0;
+    realized+=cs.report*(+c.profitPerPerson||0);
+  });
+  return{req,hire,rep,gap,profit,targetCount,targetAmount,realized};
+}
+
+// ===== Render All =====
+function renderAll(){renderDashboard();renderClients();renderPhone();renderService();renderKPI();}
+
+function renderDashboard(){
+  const t=getClientTotals(),ph=getPhoneTotals(),ss=getServiceStats();
+  const progress=getPhoneProgress(),k=data.kpi||{};
+  const allFirst=Object.values(ss).reduce((a,b)=>a+b.first,0);
+  // ★ 月報到含全程報到＋轉掛報到
+  const allReport=Object.values(ss).reduce((a,b)=>a+b.report+(b.transferReport||0),0);
+
+  document.getElementById('dashKpi').innerHTML=[
+    {label:'月總需求',value:t.req,sub:'職缺人數'},
+    {label:'月初試（當月）',value:allFirst,sub:'面試日期統計'},
+    {label:'月錄取（當月）',value:t.hire,sub:'面試日期統計'},
+    {label:'月報到（含跨月）',value:allReport,sub:'報到日期統計'},
+    {label:'整體達成率',value:t.req>0?(allReport/t.req*100).toFixed(0)+'%':'—',sub:'報到/需求'},
+    {label:'已實現利潤',value:'$'+t.realized.toLocaleString(),sub:'報到計'},
+    {label:'電訪約訪率',value:(ph.rate*100).toFixed(1)+'%',sub:'週期內合計'},
+    {label:'需求缺口',value:t.gap,sub:'待填補',cl:'red'},
+  ].map(c=>`<div class="kpi-card${c.cl?' '+c.cl:''}"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join('');
+
+  const cStats=getClientServiceStats();
+  const dct=document.querySelector('#dashClientsTable tbody');
+  if(dct) dct.innerHTML=(data.clients||[]).map(c=>{
+    const key=(c.clientName||'')+'||'+(c.position||'');
+    const cs=cStats[key]||{hire:0,report:0};
+    const req=+c.required||0;
+    return `<tr><td class="text-left">${c.clientName}</td><td class="text-left">${c.position}</td><td>${req}</td><td>${cs.hire}</td><td>${cs.report}</td><td>${req>0?(cs.report/req*100).toFixed(0)+'%':'—'}</td><td>${Math.max(0,req-cs.report)}</td></tr>`;
+  }).join('')||'<tr><td colspan="7" style="color:#94a3b8">尚無資料</td></tr>';
+
+  const needCall=Math.round(k.targetCall*progress),needConn=Math.round(k.targetConnect*progress),needAppt=Math.round(k.targetAppoint*progress);
+  const dpt=document.querySelector('#dashPhoneTable tbody');
+  if(dpt) dpt.innerHTML=[['電訪量',k.targetCall,needCall,ph.call,(ph.call/(k.targetCall||1)*100).toFixed(0)+'%'],
+    ['接通數',k.targetConnect,needConn,ph.conn,(ph.conn/(k.targetConnect||1)*100).toFixed(0)+'%'],
+    ['約訪成功',k.targetAppoint,needAppt,ph.appt,(ph.appt/(k.targetAppoint||1)*100).toFixed(0)+'%']
+  ].map(([nm,tgt,need,act,rate])=>{const ok=act>=need;return `<tr><td class="text-left">${nm}</td><td>${tgt}</td><td>${need}</td><td>${act}</td><td style="color:${ok?'#16a34a':'#dc2626'}">${ok?'超前':need-act}</td><td>${rate}</td><td>${ok?'✅':'⚠'}</td></tr>`;}).join('');
+
+  // 儀表板只顯示招募客服人員
+  const dst=document.querySelector('#dashStaffTable tbody');
+  if(dst) dst.innerHTML=getServiceStaffList().map(s=>{
+    const sv=ss[s.name]||{};
+    const trCell=sv.transferReport>0?`<span style="color:#d97706;font-weight:600">${sv.transferReport}</span>`:0;
+    return `<tr><td>${s.name}</td><td>${sv.first||0}</td><td>${sv.passFirst||0}</td><td>${sv.second||0}</td><td>${sv.hire||0}</td><td>${trCell}</td><td>${sv.report||0}</td><td>${sv.first>0?(sv.passFirst/sv.first*100).toFixed(0)+'%':'—'}</td><td>${sv.srcPhone||0}</td></tr>`;
+  }).join('')||'<tr><td colspan="9" style="color:#94a3b8">尚無資料</td></tr>';
+}
+
+// ===== 客戶需求 =====
+function updateSortIcons(){
+  document.querySelectorAll('.sort-icon').forEach(el=>el.textContent='⇅');
+  if(clientSortField){const el=document.getElementById('si-'+clientSortField);if(el)el.textContent=clientSortAsc?'▲':'▼';}
+}
+
+function sortClients(field){
+  if(clientSortField===field)clientSortAsc=!clientSortAsc;
+  else{clientSortField=field;clientSortAsc=true;}
+  updateSortIcons();renderClients();
+}
+
+function renderClients(){
+  updateSortIcons();
+  const cStats=getClientServiceStats();
+  let clients=[...(data.clients||[])];
+  if(clientSortField){
+    clients.sort((a,b)=>{let av=a[clientSortField]||0,bv=b[clientSortField]||0;
+      if(typeof av==='string')return clientSortAsc?av.localeCompare(bv):bv.localeCompare(av);
+      return clientSortAsc?av-bv:bv-av;});
+  }
+  const body=document.getElementById('clientsBody');if(!body)return;
+  body.innerHTML=clients.map(c=>{
+    const i=(data.clients||[]).indexOf(c);
+    const key=(c.clientName||'')+'||'+(c.position||'');
+    const cs=cStats[key]||{hire:0,report:0};
+    const req=+c.required||0,gap=Math.max(0,req-cs.report),realized=cs.report*(+c.profitPerPerson||0);
+    return `<tr>
+      <td>${c.type||''}</td><td>${c.direct==='轉掛'?'<span style="color:#d97706;font-weight:600">轉掛</span>':c.direct||'全程'}</td>
+      <td class="text-left">${c.clientName||''}</td><td class="text-left">${c.position||''}</td>
+      <td>${req}</td><td>${cs.hire}</td><td>${cs.report}</td>
+      <td>${(+c.profitPerPerson||0).toLocaleString()}</td>
+      <td>${c.level||''}</td><td>${c.nature||''}</td>
+      <td>${(+c.profitEstimate||0).toLocaleString()}</td>
+      <td>${c.targetCount||0}</td><td>${(+c.targetAmount||0).toLocaleString()}</td>
+      <td style="color:${gap>0?'#dc2626':'#16a34a'}">${gap}</td>
+      <td>${realized.toLocaleString()}</td>
+      <td class="action-btns">
+        <button class="btn btn-warning btn-sm" onclick="editClient(${i})">編輯</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteClient(${i})">刪除</button>
+      </td></tr>`;
+  }).join('')||'<tr><td colspan="16" style="color:#94a3b8;font-style:italic;padding:20px">尚無客戶需求，請點選「新增需求」</td></tr>';
+
+  const t=getClientTotals(),footer=document.getElementById('clientsFooter');
+  if(footer)footer.innerHTML=`<td colspan="4">合計</td><td>${t.req}</td><td>${t.hire}</td><td>${t.rep}</td><td></td><td></td><td></td><td>${t.profit.toLocaleString()}</td><td>${t.targetCount}</td><td>${t.targetAmount.toLocaleString()}</td><td>${t.gap}</td><td>${t.realized.toLocaleString()}</td><td></td>`;
+}
+
+function openClientModal(editIdx){
+  document.getElementById('clientModalTitle').textContent=editIdx!=null?'編輯客戶需求':'新增客戶需求';
+  document.getElementById('clientEditId').value=editIdx!=null?editIdx:'';
+  if(editIdx!=null){
+    const c=data.clients[editIdx];
+    document.getElementById('cType').value=c.type||'派遣';
+    document.getElementById('cDirect').value=c.direct||'直接';
+    document.getElementById('cName').value=c.clientName||'';
+    document.getElementById('cPosition').value=c.position||'';
+    document.getElementById('cRequired').value=c.required||0;
+    document.getElementById('cProfit').value=c.profitPerPerson||0;
+    document.getElementById('cProfitEstimate').value=(c.required||0)*(c.profitPerPerson||0);
+    document.getElementById('cLevel').value=c.level||'乙';
+    document.getElementById('cNature').value=c.nature||'長派';
+    document.getElementById('cTargetCount').value=c.targetCount||0;
+    document.getElementById('cTargetAmount').value=(c.targetCount||0)*(c.profitPerPerson||0);
+  }else{
+    ['cName','cPosition'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('cType').value='派遣';document.getElementById('cDirect').value='全程';
+    document.getElementById('cLevel').value='乙';document.getElementById('cNature').value='長派';
+    ['cRequired','cProfit','cProfitEstimate','cTargetCount','cTargetAmount'].forEach(id=>document.getElementById(id).value=0);
+  }
+  document.getElementById('clientModal').classList.add('open');
+}
+
+function editClient(idx){openClientModal(idx);}
+function deleteClient(idx){if(confirm('確定要刪除此筆需求？')){data.clients.splice(idx,1);saveData();}}
+
+function calcProfitEstimate(){
+  document.getElementById('cProfitEstimate').value=(+document.getElementById('cProfit').value||0)*(+document.getElementById('cRequired').value||0);
+}
+function calcTargetAmount(){
+  document.getElementById('cTargetAmount').value=(+document.getElementById('cProfit').value||0)*(+document.getElementById('cTargetCount').value||0);
+}
+
+function saveClient(){
+  const idx=document.getElementById('clientEditId').value;
+  const profitPerPerson=+document.getElementById('cProfit').value||0;
+  const required=+document.getElementById('cRequired').value||0;
+  const client={
+    type:document.getElementById('cType').value,direct:document.getElementById('cDirect').value,
+    clientName:document.getElementById('cName').value,position:document.getElementById('cPosition').value,
+    required,profitPerPerson,level:document.getElementById('cLevel').value,nature:document.getElementById('cNature').value,
+    profitEstimate:profitPerPerson*required,
+    targetCount:+document.getElementById('cTargetCount').value||0,
+    targetAmount:(+document.getElementById('cTargetCount').value||0)*profitPerPerson
+  };
+  if(!client.clientName||!client.position){alert('請填寫客戶名稱與職缺名稱');return;}
+  if(idx!=='')data.clients[+idx]=client;else data.clients.push(client);
+  closeModal('clientModal');saveData();
+}
+
+async function importLastMonthClients(){
+  const [y,m]=currentMonth.split('-').map(Number);
+  const py=m===1?y-1:y,pm=m===1?12:m-1;
+  const prevMonthStr=`${py}-${String(pm).padStart(2,'0')}`;
+  let prevData=null;
+  try{showLoading(true);const doc=await db.collection('months').doc(prevMonthStr).get();showLoading(false);if(doc.exists)prevData=doc.data();}
+  catch(e){showLoading(false);console.error(e);}
+  if(!prevData&&PRESET[prevMonthStr])prevData=PRESET[prevMonthStr];
+  if(!prevData||!prevData.clients||prevData.clients.length===0){alert('找不到 '+prevMonthStr+' 的客戶需求資料。');return;}
+  if(data.clients&&data.clients.length>0){if(!confirm('目前已有 '+data.clients.length+' 筆需求資料，確定要以上月資料覆蓋？'))return;}
+  const fields=['type','direct','clientName','position','required','profitPerPerson','level','nature','profitEstimate','targetCount','targetAmount'];
+  data.clients=prevData.clients.map(c=>{const nc={};fields.forEach(f=>{nc[f]=c[f]!==undefined?c[f]:'';});return nc;});
+  saveData();alert('已成功帶入 '+prevMonthStr+' 的客戶需求資料（共 '+data.clients.length+' 筆）。');
+}
+
+// ===== 電訪人員切換與裝置記憶 =====
+function switchPhoneStaff(name){
+  currentPhoneStaff=name;
+  localStorage.setItem('phoneCurrentStaff',name);
+  renderPhone();
+}
+
+function clearPhoneMemory(){
+  currentPhoneStaff=null;
+  localStorage.removeItem('phoneCurrentStaff');
+  renderPhone();
+}
+
+// 資料載入後校驗 localStorage 的記憶是否仍在人員清單中
+function validatePhoneStaffMemory(){
+  if(!currentPhoneStaff) return;
+  const exists=getPhoneStaff().some(s=>s.name===currentPhoneStaff);
+  if(!exists){ currentPhoneStaff=null; localStorage.removeItem('phoneCurrentStaff'); }
+}
+
+// ===== 電訪記錄 =====
+function renderPhone(){
+  const phoneStaff=getPhoneStaff();
+  const container=document.getElementById('phoneStaffSections');
+  if(!container)return;
+  const todayStr=new Date().toISOString().slice(0,10);
+
+  // ── 無電訪人員 ──
+  if(phoneStaff.length===0){
+    container.innerHTML=`<div style="text-align:center;padding:40px;color:#94a3b8">
+      <div style="font-size:32px;margin-bottom:12px">📞</div>
+      <div style="font-size:14px">尚未設定電訪人員</div>
+      <div style="margin-top:12px"><button class="btn btn-primary" onclick="addPhoneStaff()">＋ 新增電訪人員</button></div>
+    </div>`;
+    return;
+  }
+
+  // ── 若 localStorage 記憶的人已不在名單，清除 ──
+  if(currentPhoneStaff&&!phoneStaff.some(s=>s.name===currentPhoneStaff)){
+    currentPhoneStaff=null; localStorage.removeItem('phoneCurrentStaff');
+  }
+
+  // ── 人員切換列 ──
+  const switcherBtns=phoneStaff.map(s=>{
+    const active=currentPhoneStaff===s.name;
+    const roleBadge=s.role.includes('支援')
+      ?'<span style="background:#fef9c3;color:#b45309;border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px">支援</span>'
+      :'<span style="background:#dcfce7;color:#15803d;border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px">開發</span>';
+    return `<button onclick="switchPhoneStaff('${s.name}')"
+      style="padding:6px 16px;border-radius:20px;border:2px solid ${active?'#2563eb':'#e2e8f0'};
+             background:${active?'#2563eb':'#fff'};color:${active?'#fff':'#374151'};
+             font-size:13px;font-weight:${active?'700':'500'};cursor:pointer;transition:.15s;white-space:nowrap">
+      📞 ${s.name}${roleBadge}
+    </button>`;
+  }).join('');
+
+  const memBar=currentPhoneStaff
+    ?`<div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;font-size:12px;color:#15803d">
+        🖥️ 此裝置已記憶為 <strong>${currentPhoneStaff}</strong>，開啟系統自動顯示此人記錄
+        <button onclick="clearPhoneMemory()" style="margin-left:4px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:12px;text-decoration:underline">清除記憶</button>
+      </div>`
+    :`<div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:6px 14px;font-size:12px;color:#b45309">
+        💡 點選上方姓名即可切換，並自動記憶此裝置的操作人員（下次開啟免切換）
+      </div>`;
+
+  // ── 若未選取任何人，預設顯示第一位 ──
+  const activeStaff=currentPhoneStaff
+    ? phoneStaff.find(s=>s.name===currentPhoneStaff)||phoneStaff[0]
+    : phoneStaff[0];
+  if(!currentPhoneStaff){ currentPhoneStaff=phoneStaff[0].name; localStorage.setItem('phoneCurrentStaff',currentPhoneStaff); }
+
+  // ── 建立目前人員的記錄表 ──
+  function buildTable(s){
+    const staffName=s.name;
+    const recs=((data.phoneRecords||{})[staffName])||{};
+    let totalCall=0,totalConn=0,totalAppt=0;
+    const rows=getPhoneRangeDates().map(({date,wd,isWeekend})=>{
+      if(isWeekend)return `<tr class="tr-weekend"><td>${date.slice(5)}</td><td>${wd}</td><td colspan="6" style="color:#94a3b8;font-size:12px">休假日</td></tr>`;
+      const r=recs[date]||{},call=r.callCount||0,conn=r.connected||0,appt=r.appointSuccess||0;
+      const rate=call>0?(appt/call*100).toFixed(1)+'%':'—';
+      totalCall+=call;totalConn+=conn;totalAppt+=appt;
+      const isToday=date===todayStr;
+      return `<tr class="${isToday?'tr-today':''}">
+        <td>${date.slice(5)}${isToday?' 📍':''}</td><td>${wd}</td>
+        <td><input class="inline-edit" type="number" min="0" value="${call||''}" placeholder="0" onchange="savePhone('${staffName}','${date}','callCount',this.value)" style="width:60px"></td>
+        <td><input class="inline-edit" type="number" min="0" value="${conn||''}" placeholder="0" onchange="savePhone('${staffName}','${date}','connected',this.value)" style="width:60px"></td>
+        <td>${call>0?call-conn:'—'}</td>
+        <td><input class="inline-edit" type="number" min="0" value="${appt||''}" placeholder="0" onchange="savePhone('${staffName}','${date}','appointSuccess',this.value)" style="width:60px"></td>
+        <td>${rate}</td>
+        <td><input type="text" value="${r.note||''}" placeholder="備註" onchange="savePhone('${staffName}','${date}','note',this.value)" style="width:120px;border:1px solid #e2e8f0;border-radius:4px;padding:2px 6px;font-size:12px"></td>
+      </tr>`;
+    }).join('');
+    const totalRate=totalCall>0?(totalAppt/totalCall*100).toFixed(1)+'%':'—';
+    return{rows,totalCall,totalConn,totalAppt,totalRate};
+  }
+
+  const {rows,totalCall,totalConn,totalAppt,totalRate}=buildTable(activeStaff);
+
+  // 合計（多人時）
+  let aggHtml='';
+  if(phoneStaff.length>1){
+    const agg=getPhoneTotals();
+    aggHtml=`<div style="margin-top:16px;padding:12px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;display:flex;gap:24px;flex-wrap:wrap;font-size:13px">
+      <span style="color:#64748b;font-weight:600">所有人員合計：</span>
+      <span>電訪量 <strong>${agg.call}</strong></span>
+      <span>接通數 <strong>${agg.conn}</strong></span>
+      <span>未接 <strong>${agg.rejected}</strong></span>
+      <span>約訪成功 <strong>${agg.appt}</strong></span>
+      <span>約訪率 <strong style="color:#1e40af">${(agg.rate*100).toFixed(1)}%</strong></span>
+    </div>`;
+  }
+
+  container.innerHTML=`
+    <!-- 人員切換列 -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      ${switcherBtns}
+      <button class="btn btn-primary btn-sm" onclick="addPhoneStaff()" style="margin-left:4px">＋ 新增人員</button>
+    </div>
+    <!-- 記憶狀態提示 -->
+    <div style="margin-bottom:12px">${memBar}</div>
+    <!-- 當前人員記錄 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">📞 ${activeStaff.name}　<span style="font-size:12px;color:#64748b;font-weight:400">${activeStaff.role}</span></span>
+        <button class="btn btn-danger btn-sm" onclick="removePhoneStaff('${activeStaff.name}')">移除此人員</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>日期</th><th>星期</th><th>電訪量</th><th>接通數</th><th>未接/拒接</th><th>約訪成功</th><th>約訪率</th><th>備註</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="tr-total"><td>小計</td><td></td><td>${totalCall}</td><td>${totalConn}</td><td>${totalCall-totalConn}</td><td>${totalAppt}</td><td>${totalRate}</td><td></td></tr></tfoot>
+      </table></div>
+    </div>
+    ${aggHtml}`;
+}
+
+function savePhone(staffName,date,field,val){
+  if(!data.phoneRecords)data.phoneRecords={};
+  if(!data.phoneRecords[staffName])data.phoneRecords[staffName]={};
+  if(!data.phoneRecords[staffName][date])data.phoneRecords[staffName][date]={callCount:0,connected:0,appointSuccess:0,note:''};
+  data.phoneRecords[staffName][date][field]=field==='note'?val:(+val||0);
+  setSyncBadge(true);clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>{getDocRef().set(data).then(()=>setSyncBadge(false)).catch(e=>{console.error(e);setSyncBadge(false);});},400);
+}
+
+// 新增電訪人員
+function addPhoneStaff(){
+  const name=prompt('請輸入電訪人員姓名：');
+  if(!name||!name.trim())return;
+  const n=name.trim();
+  if((data.kpi?.staff||[]).some(s=>s.name===n)){alert('已有同名人員「'+n+'」，請使用不同姓名。');return;}
+  if(!data.kpi)data.kpi={totalBonus:10000,targetCall:1000,targetConnect:450,targetAppoint:48,targetResume:400,actualResume:0,targetFirst:5,targetHire:4,targetReport:4,staff:[]};
+  if(!data.kpi.staff)data.kpi.staff=[];
+  data.kpi.staff.push({name:n,role:'電訪支援',share:0,auxType:'彈性獎金',auxLimit:500,manualBonus:0,transferCount:0});
+  saveData();
+}
+
+// 移除電訪人員（依姓名）
+function removePhoneStaff(staffName){
+  const idx=(data.kpi?.staff||[]).findIndex(s=>s.name===staffName);
+  if(idx<0)return;
+  if(!confirm(`確定要移除電訪人員「${staffName}」？\n其本月電訪記錄也將一併移除。`))return;
+  if(data.phoneRecords&&data.phoneRecords[staffName])delete data.phoneRecords[staffName];
+  data.kpi.staff.splice(idx,1);
+  saveData();
+}
+
+// ===== 招募客服 =====
+function getClientNames(){return[...new Set((data.clients||[]).map(c=>c.clientName))];}
+function getPositionsByClient(cn){return(data.clients||[]).filter(c=>c.clientName===cn).map(c=>c.position);}
+
+// 新增客服人員
+function addServiceStaff(){
+  const name=prompt('請輸入招募客服人員姓名：');
+  if(!name||!name.trim())return;
+  const n=name.trim();
+  if((data.kpi?.staff||[]).some(s=>s.name===n)){alert('已有同名人員「'+n+'」，請使用不同姓名。');return;}
+  if(!data.kpi)data.kpi={totalBonus:10000,targetCall:1000,targetConnect:450,targetAppoint:48,targetResume:400,actualResume:0,targetFirst:5,targetHire:4,targetReport:4,staff:[]};
+  if(!data.kpi.staff)data.kpi.staff=[];
+  data.kpi.staff.push({name:n,role:'招募客服',share:0,auxType:'轉掛業務分層獎金',auxLimit:500,transferCount:0});
+  saveData();
+}
+
+// 移除客服人員（依姓名）
+function removeServiceStaff(staffName){
+  const idx=(data.kpi?.staff||[]).findIndex(s=>s.name===staffName);
+  if(idx<0)return;
+  if(!confirm(`確定要移除客服人員「${staffName}」？`))return;
+  data.kpi.staff.splice(idx,1);
+  saveData();
+}
+
+function sortService(field){
+  if(serviceSortField===field) serviceSortAsc=!serviceSortAsc;
+  else{serviceSortField=field;serviceSortAsc=true;}
+  renderService();
+}
+
+function renderService(){
+  // 動態更新 info bar 顯示實際週期日期
+  const ib=document.getElementById('serviceInfoBar');
+  if(ib) ib.innerHTML=`💡 統計週期與電訪相同：<strong>${getServicePeriodLabel()}</strong>。面試日期在此週期內的記錄均屬本月，可正常新增、編輯、刪除。<span style="color:#15803d">◼ 綠底列</span>為上月面試、本月報到的記錄，僅供報到數統計，不可編輯。`;
+
+  // ===== 人員管理區 =====
+  const svcDiv=document.getElementById('serviceStaffList');
+  if(svcDiv){
+    const svcStaff=getServiceStaffList();
+    if(svcStaff.length===0){
+      svcDiv.innerHTML='<span style="color:#94a3b8;font-size:12px">尚無客服人員，請點選「新增人員」</span>';
+    } else {
+      svcDiv.innerHTML=svcStaff.map(s=>`
+        <div class="staff-tag">
+          <span>${s.name}</span>
+          <span class="role-label">${s.role}</span>
+          <button class="remove-btn" onclick="removeServiceStaff('${s.name}')" title="移除 ${s.name}">×</button>
+        </div>`).join('');
+    }
+  }
+
+  // ===== 面試記錄排序圖示更新 =====
+  ['date','staffName','candidateName','position','clientName','firstResult','arrangeSecond','hireResult','hireDate','reportDate','source'].forEach(f=>{
+    const el=document.getElementById('ssi-'+f);
+    if(el) el.textContent=serviceSortField===f?(serviceSortAsc?'▲':'▼'):'⇅';
+  });
+
+  // ===== 面試記錄表（本服務週期：上月26日 ～ 本月25日，全部視為本月記錄）=====
+  const recs=data.serviceRecords||[];
+  const body=document.getElementById('serviceBody');if(!body)return;
+
+  // ① 面試日期在服務週期內 → 可編輯/刪除（依排序欄位排序）
+  const inPeriodRecs=recs.map((r,i)=>({...r,origIdx:i})).filter(r=>inServicePeriod(r.date));
+  inPeriodRecs.sort((a,b)=>{
+    const av=a[serviceSortField]||'', bv=b[serviceSortField]||'';
+    const cmp=av.localeCompare(bv,'zh-TW',{numeric:true});
+    return serviceSortAsc?cmp:-cmp;
+  });
+  const sorted=inPeriodRecs;
+  const editableRows=sorted.map(({origIdx:i,...r})=>{
+    const fb=r.firstResult==='通過'?'badge-pass':r.firstResult==='未通過'?'badge-fail':'badge-wait';
+    const hb=r.hireResult==='錄取'?'badge-pass':r.hireResult==='未錄取'?'badge-fail':'badge-wait';
+    return `<tr>
+      <td>${r.date||''}</td><td>${r.staffName||''}</td><td>${r.candidateName||''}</td>
+      <td>${r.position||''}</td><td>${r.clientName||''}</td>
+      <td><span class="badge ${fb}">${r.firstResult||'待定'}</span></td>
+      <td>${r.arrangeSecond||'—'}</td>
+      <td><span class="badge ${hb}">${r.hireResult||'待定'}</span></td>
+      <td>${r.hireDate?`<span style="color:#d97706;font-weight:600">${r.hireDate}</span>`:'—'}</td>
+      <td>${r.reportDate||'—'}</td><td>${r.source||''}</td>
+      <td class="text-left" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note||''}">${r.note||''}</td>
+      <td class="action-btns">
+        <button class="btn btn-warning btn-sm" onclick="editService(${i})">編輯</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteService(${i})">刪除</button>
+      </td></tr>`;
+  });
+
+  // ② 唯讀輔助函式：產生唯讀列 HTML
+  function makeReadonlyRow(r,label){
+    const fb=r.firstResult==='通過'?'badge-pass':r.firstResult==='未通過'?'badge-fail':'badge-wait';
+    const hb=r.hireResult==='錄取'?'badge-pass':r.hireResult==='未錄取'?'badge-fail':'badge-wait';
+    return `<tr style="background:#f0fdf4;opacity:0.85">
+      <td>${r.date||''}<br><span style="font-size:10px;color:#64748b">${label}</span></td>
+      <td>${r.staffName||''}</td><td>${r.candidateName||''}</td>
+      <td>${r.position||''}</td><td>${r.clientName||''}</td>
+      <td><span class="badge ${fb}">${r.firstResult||'待定'}</span></td>
+      <td>${r.arrangeSecond||'—'}</td>
+      <td><span class="badge ${hb}">${r.hireResult||'待定'}</span></td>
+      <td>${r.hireDate?`<span style="color:#d97706;font-weight:600">${r.hireDate}</span>`:'—'}</td>
+      <td style="color:#15803d;font-weight:600">${r.reportDate||'—'}<br><span style="font-size:10px;font-weight:400;background:#dcfce7;border-radius:8px;padding:1px 5px">本月報到</span></td>
+      <td>${r.source||''}</td>
+      <td class="text-left" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note||''}">${r.note||''}</td>
+      <td style="color:#94a3b8;font-size:12px;text-align:center">唯讀</td>
+    </tr>`;
+  }
+
+  // ③ 來源①：crossMonthServiceRecords（上月文件，面試在週期前，報到在週期內）
+  const crossReportRecs=crossMonthServiceRecords
+    .filter(r=>r.reportDate&&inServicePeriod(r.reportDate))
+    .sort((a,b)=>(b.reportDate||'').localeCompare(a.reportDate||''));
+
+  // ④ 來源②：data.serviceRecords 中面試日期不在本週期、但報到日在本週期的記錄
+  //    （例如面試日期被修改至週期外，或資料遺留在本月文件但日期屬於其他週期）
+  const orphanReportRecs=recs
+    .filter(r=>!inServicePeriod(r.date)&&r.reportDate&&inServicePeriod(r.reportDate))
+    .sort((a,b)=>(b.reportDate||'').localeCompare(a.reportDate||''));
+
+  const readonlyRows=[
+    ...crossReportRecs.map(r=>makeReadonlyRow(r,'面試於上月')),
+    ...orphanReportRecs.map(r=>makeReadonlyRow(r,'面試不在本週期'))
+  ];
+
+  // 若三邊都沒資料，顯示空白提示
+  if(editableRows.length===0&&readonlyRows.length===0){
+    body.innerHTML='<tr><td colspan="13" style="color:#94a3b8;font-style:italic;padding:20px">尚無面試記錄，請點選「新增記錄」</td></tr>';
+  } else {
+    // 可編輯記錄在上，唯讀的「本月報到」記錄在下
+    body.innerHTML=editableRows.join('')+readonlyRows.join('');
+  }
+
+  // ===== 月績效彙總 =====
+  const ss=getServiceStats();
+  const allNames=[...new Set([...getKPIStaffNames(),...Object.keys(ss)])].filter(n=>ss[n]);
+  let tF=0,tP=0,tS=0,tH=0,tTr=0,tR=0,tPh=0,tSe=0,tO=0;
+  const sumBody=document.getElementById('serviceSummaryBody');
+  if(sumBody) sumBody.innerHTML=allNames.map(n=>{
+    const s=ss[n];
+    tF+=s.first;tP+=s.passFirst;tS+=s.second;tH+=s.hire;tTr+=s.transferReport||0;tR+=s.report;
+    tPh+=s.srcPhone;tSe+=s.srcSelf;tO+=s.srcOther;
+    const rate=s.first>0?(s.passFirst/s.first*100).toFixed(0)+'%':'—';
+    const trCell=s.transferReport>0?`<span style="color:#d97706;font-weight:600">${s.transferReport}</span>`:0;
+    return `<tr><td>${n}</td><td>${s.first}</td><td>${s.passFirst}</td><td>${s.second}</td><td>${s.hire}</td><td>${trCell}</td><td>${s.report}</td><td>${rate}</td><td>${s.srcPhone}</td><td>${s.srcSelf}</td><td>${s.srcOther}</td></tr>`;
+  }).join('')||'<tr><td colspan="11" style="color:#94a3b8">尚無當月記錄</td></tr>';
+
+  const sumFoot=document.getElementById('serviceSummaryFooter');
+  if(sumFoot) sumFoot.innerHTML=`<td>合計</td><td>${tF}</td><td>${tP}</td><td>${tS}</td><td>${tH}</td><td>${tTr}</td><td>${tR}</td><td>${tF>0?(tP/tF*100).toFixed(0)+'%':'—'}</td><td>${tPh}</td><td>${tSe}</td><td>${tO}</td>`;
+}
+
+function onClientChange(){
+  const cl=document.getElementById('sClient').value;
+  const pos=getPositionsByClient(cl);
+  document.getElementById('sPosition').innerHTML='<option value="">請選擇</option>'+pos.map(p=>`<option>${p}</option>`).join('');
+}
+
+function openServiceModal(editIdx){
+  document.getElementById('serviceModalTitle').textContent=editIdx!=null?'編輯面試記錄':'新增面試記錄';
+  document.getElementById('serviceEditId').value=editIdx!=null?editIdx:'';
+  const staffEl=document.getElementById('sStaff');
+  staffEl.innerHTML='<option value="">請選擇</option>'+getKPIStaffNames().map(n=>`<option>${n}</option>`).join('');
+  const clientEl=document.getElementById('sClient');
+  clientEl.innerHTML='<option value="">請選擇</option>'+getClientNames().map(n=>`<option>${n}</option>`).join('');
+  document.getElementById('sPosition').innerHTML='<option value="">請選擇</option>';
+  if(editIdx!=null){
+    const r=data.serviceRecords[editIdx];
+    document.getElementById('sDate').value=r.date||'';
+    staffEl.value=r.staffName||'';
+    document.getElementById('sCandidate').value=r.candidateName||'';
+    clientEl.value=r.clientName||'';onClientChange();
+    document.getElementById('sPosition').value=r.position||'';
+    document.getElementById('sSource').value=r.source||'其他';
+    document.getElementById('sFirstResult').value=r.firstResult||'';
+    document.getElementById('sSecond').value=r.arrangeSecond||'';
+    document.getElementById('sHireResult').value=r.hireResult||'';
+    document.getElementById('sHireDate').value=r.hireDate||'';
+    document.getElementById('sReportDate').value=r.reportDate||'';
+    document.getElementById('sNote').value=r.note||'';
+  }else{
+    document.getElementById('sDate').value=new Date().toISOString().slice(0,10);
+    ['sCandidate','sNote'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('sSource').value='電訪';
+    ['sFirstResult','sSecond','sHireResult','sHireDate','sReportDate'].forEach(id=>document.getElementById(id).value='');
+  }
+  document.getElementById('serviceModal').classList.add('open');
+}
+
+function editService(idx){openServiceModal(idx);}
+function deleteService(idx){if(confirm('確定要刪除此筆記錄？')){data.serviceRecords.splice(idx,1);saveData();}}
+
+// ★ 依面試日期判斷屬於哪個月份的服務週期
+//   day 26~月底 → 下個月的服務週期；day 1~25 → 同月的服務週期
+function getServiceMonthForDate(dateStr){
+  if(!dateStr) return null;
+  const [y,m,d]=dateStr.split('-').map(Number);
+  if(d>=26){
+    const nm=m===12?1:m+1, ny=m===12?y+1:y;
+    return `${ny}-${String(nm).padStart(2,'0')}`;
+  }
+  return `${y}-${String(m).padStart(2,'0')}`;
+}
+
+// ★ 將記錄跨文件移動：從本月文件刪除，寫入目標月份文件
+async function moveServiceRecordToMonth(rec,removeIdx,targetMonth){
+  try{
+    showLoading(true);
+    // 1. 從本月文件刪除（若是編輯現有記錄）
+    if(removeIdx!==''){ data.serviceRecords.splice(+removeIdx,1); }
+    await getDocRef().set(data);
+    // 2. 寫入目標月份文件
+    const targetDoc=await db.collection('months').doc(targetMonth).get();
+    const targetData=targetDoc.exists?targetDoc.data():defaultData();
+    if(!targetData.serviceRecords) targetData.serviceRecords=[];
+    targetData.serviceRecords.push(rec);
+    await db.collection('months').doc(targetMonth).set(targetData);
+    showLoading(false);
+    alert(`✅ 面試日期 ${rec.date} 屬於 ${targetMonth} 服務週期，記錄已自動移至該月份。`);
+  }catch(e){
+    showLoading(false);
+    console.error('跨月移動失敗:',e);
+    alert('移動失敗，請確認網路狀態。');
+  }
+}
+
+function saveService(){
+  const idx=document.getElementById('serviceEditId').value;
+  const rec={
+    date:document.getElementById('sDate').value,
+    staffName:document.getElementById('sStaff').value,
+    candidateName:document.getElementById('sCandidate').value,
+    clientName:document.getElementById('sClient').value,
+    position:document.getElementById('sPosition').value,
+    source:document.getElementById('sSource').value,
+    firstResult:document.getElementById('sFirstResult').value,
+    arrangeSecond:document.getElementById('sSecond').value,
+    hireResult:document.getElementById('sHireResult').value,
+    hireDate:document.getElementById('sHireDate').value,
+    reportDate:document.getElementById('sReportDate').value,
+    note:document.getElementById('sNote').value
+  };
+  if(!rec.date||!rec.staffName){alert('請填寫面試日期與客服人員');return;}
+
+  // ★ 若面試日期不屬於本月服務週期，自動移到正確的月份文件
+  const targetMonth=getServiceMonthForDate(rec.date);
+  if(targetMonth&&targetMonth!==currentMonth){
+    closeModal('serviceModal');
+    moveServiceRecordToMonth(rec,idx,targetMonth);
+    return;
+  }
+
+  if(idx!=='')data.serviceRecords[+idx]=rec;else data.serviceRecords.push(rec);
+  closeModal('serviceModal');saveData();
+}
+
+// ===== KPI獎金 =====
+function renderKPI(){
+  const k=data.kpi||{},ss=getServiceStats(),staffData=k.staff||[];
+  document.getElementById('kpiStaffBody').innerHTML=staffData.map((s,i)=>{
+    const alloc=Math.round(k.totalBonus*s.share),mainLimit=alloc-s.auxLimit;
+    const total=calcStaffBonus(s,i,ss,k).total;
+    return `<tr>
+      <td><input type="text" value="${s.name}" style="width:70px;border:1px solid #e2e8f0;border-radius:4px;padding:3px 6px;font-size:12px" onchange="updateKPIStaff(${i},'name',this.value)"></td>
+      <td><input type="text" value="${s.role}" style="width:90px;border:1px solid #e2e8f0;border-radius:4px;padding:3px 6px;font-size:12px" onchange="updateKPIStaff(${i},'role',this.value)"></td>
+      <td><input type="number" value="${s.share}" step="0.05" min="0" max="1" style="width:60px;border:1px solid #e2e8f0;border-radius:4px;padding:3px 6px;font-size:12px" onchange="updateKPIStaff(${i},'share',+this.value)"></td>
+      <td>${alloc.toLocaleString()}</td>
+      <td><input type="text" value="${s.auxType||''}" style="width:120px;border:1px solid #e2e8f0;border-radius:4px;padding:3px 6px;font-size:12px" onchange="updateKPIStaff(${i},'auxType',this.value)"></td>
+      <td><input type="number" value="${s.auxLimit||0}" style="width:60px;border:1px solid #e2e8f0;border-radius:4px;padding:3px 6px;font-size:12px" onchange="updateKPIStaff(${i},'auxLimit',+this.value)"></td>
+      <td>${mainLimit.toLocaleString()}</td>
+      <td style="font-weight:700;color:#1e40af">${total.toLocaleString()} 元</td>
+      <td><button class="btn btn-danger btn-sm" onclick="removeKPIStaff(${i})">刪除</button></td>
+    </tr>`;
+  }).join('');
+
+  const cardsDiv=document.getElementById('kpiCards');
+  cardsDiv.innerHTML=staffData.map((_,i)=>`<div class="section" id="kpiCard${i}"></div>`).join('');
+  staffData.forEach((s,i)=>{
+    const alloc=Math.round(k.totalBonus*s.share);
+    const {total,weighted,rows}=calcStaffBonus(s,i,ss,k);
+    const icon=s.role.includes('電訪')?'📞':'👤';
+    document.getElementById(`kpiCard${i}`).innerHTML=`
+      <div class="section-header"><span class="section-title">${icon} ${s.name}　${s.role}</span></div>
+      <div style="padding:12px">
+        <div style="display:flex;gap:12px;margin-bottom:10px">
+          <div style="flex:1;background:#eff6ff;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#64748b">分配金額</div><div style="font-weight:700;color:#1e40af">${alloc.toLocaleString()} 元</div></div>
+          <div style="flex:1;background:#f0fdf4;border-radius:8px;padding:8px;text-align:center"><div style="font-size:11px;color:#64748b">本月獎金</div><div style="font-weight:700;color:#16a34a;font-size:18px">${total.toLocaleString()} 元</div></div>
+        </div>
+        <div class="table-wrap"><table style="min-width:unset"><thead><tr><th>指標</th><th>目標</th><th>實績</th><th>達成率</th><th>權重</th><th>加權得分</th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${weighted>=0&&weighted<0.6&&!s.role.includes('支援')?'<div style="background:#fef2f2;border-radius:6px;padding:8px;margin-top:8px;font-size:12px;color:#dc2626">⚠ 加權得分低於60%，主KPI獎金為0</div>':''}
+      </div>`;
+  });
+
+  const totalShare=staffData.reduce((s,x)=>s+(+x.share||0),0);
+  const shareEl=document.getElementById('kpiShareTotal');
+  if(shareEl){
+    const ok=Math.abs(totalShare-1)<0.01;
+    shareEl.innerHTML=`份額合計：<strong style="color:${ok?'#16a34a':'#dc2626'}">${(totalShare*100).toFixed(0)}%</strong>${ok?'　✅':'　⚠ 請調整至100%'}`;
+  }
+}
+
+function calcStaffBonus(s,i,ss,k){
+  const alloc=Math.round(k.totalBonus*s.share),mainLimit=alloc-(s.auxLimit||0);
+  let mainKPI=0,auxBonus=0,weighted=0,rows='';
+
+  if(s.role.includes('電訪')&&!s.role.includes('支援')){
+    // ===== 電訪開發：依自己的電訪記錄計算 =====
+    const sPh=getPhoneTotalsForStaff(s.name);
+    const metrics=[['電訪量',k.targetCall,sPh.call,0.25],['接通數',k.targetConnect,sPh.conn,0.25],['約訪成功',k.targetAppoint,sPh.appt,0.5]];
+    weighted=metrics.reduce((sum,[,tgt,act,w])=>sum+Math.min(act/(tgt||1),1.2)*w,0);
+    mainKPI=weighted>=0.6?Math.round(mainLimit*weighted):0;
+    const resumeRate=(k.actualResume||0)/(k.targetResume||1);
+    auxBonus=resumeRate>=1.1?Math.min(s.auxLimit||0,300):resumeRate>=1.0?Math.min(s.auxLimit||0,150):0;
+    rows=metrics.map(([nm,tgt,act,w])=>{const r=act/(tgt||1),rs=Math.min(r,1.2)*w;return `<tr><td class="text-left">${nm}</td><td>${tgt}</td><td>${act}</td><td>${(r*100).toFixed(0)}%</td><td>${(w*100).toFixed(0)}%</td><td>${(rs*100).toFixed(1)}%</td></tr>`;}).join('');
+    rows+=`<tr class="tr-total"><td colspan="4">加權總得分</td><td colspan="2">${(weighted*100).toFixed(1)}%</td></tr>`;
+    rows+=`<tr><td class="text-left">RPO履歷蒐集</td><td>${k.targetResume}</td><td>${k.actualResume||0}</td><td>${(resumeRate*100).toFixed(0)}%</td><td colspan="2">獎金：${auxBonus} 元</td></tr>`;
+
+  } else if(s.role.includes('支援')||s.role.includes('電訪支援')){
+    // ===== 電訪支援 / 支援性質：彈性手動設定 =====
+    const manual=s.manualBonus||0;
+    weighted=1; // 不適用達成率警告
+    mainKPI=Math.min(manual,alloc);
+    auxBonus=0;
+    rows=`<tr>
+      <td class="text-left" colspan="2">彈性獎金設定</td>
+      <td colspan="4">
+        <input type="number" value="${manual}" min="0" style="width:90px;border:1px solid #2563eb;border-radius:4px;padding:3px 6px;font-size:13px;text-align:center"
+          onchange="updateKPIStaff(${i},'manualBonus',+this.value)"> 元
+        <span style="font-size:11px;color:#64748b;margin-left:6px">（上限 ${alloc.toLocaleString()} 元）</span>
+      </td>
+    </tr>`;
+
+  } else {
+    // ===== 招募客服：依面試記錄計算 =====
+    const sv=ss[s.name]||{};
+    // 主KPI：初試、錄取（全程）、報到
+    const metrics=[['初試人數',k.targetFirst,sv.first||0,0.2],['錄取人數（全程）',k.targetHire,sv.hire||0,0.35],['報到人數',k.targetReport,sv.report||0,0.45]];
+    weighted=metrics.reduce((sum,[,tgt,act,w])=>sum+Math.min(act/(tgt||1),1.2)*w,0);
+    mainKPI=weighted>=0.6?Math.round(mainLimit*weighted):0;
+    // 轉掛件數獎金：從面試記錄自動計算（轉掛客戶的報到數）
+    // ★ 2026-05 起適用新級距；2026-04 以前沿用舊級距
+    const tc=sv.transferReport||0;
+    const useNewTier=currentMonth>='2026-05';
+    if(useNewTier){
+      auxBonus=tc>=11?Math.min(s.auxLimit||0,500):tc>=6?Math.min(s.auxLimit||0,350):tc>=1?Math.min(s.auxLimit||0,200):0;
+    } else {
+      auxBonus=tc>=21?Math.min(s.auxLimit||0,500):tc>=11?Math.min(s.auxLimit||0,350):tc>=1?Math.min(s.auxLimit||0,200):0;
+    }
+    const tierLabel=useNewTier?'1~5件200/6~10件350/11+件500':'1~10件200/11~20件350/21+件500';
+    rows=metrics.map(([nm,tgt,act,w])=>{const r=act/(tgt||1),rs=Math.min(r,1.2)*w;return `<tr><td class="text-left">${nm}</td><td>${tgt}</td><td>${act}</td><td>${(r*100).toFixed(0)}%</td><td>${(w*100).toFixed(0)}%</td><td>${(rs*100).toFixed(1)}%</td></tr>`;}).join('');
+    rows+=`<tr class="tr-total"><td colspan="4">加權總得分</td><td colspan="2">${(weighted*100).toFixed(1)}%</td></tr>`;
+    rows+=`<tr><td class="text-left">轉掛報到件數</td><td colspan="2" style="color:#d97706;font-weight:600">${tc} 件<span style="font-size:10px;color:#94a3b8;margin-left:4px">（自動統計）</span></td><td colspan="3">獎金：${auxBonus} 元<span style="font-size:10px;color:#64748b;margin-left:4px">（${tierLabel}）</span></td></tr>`;
+  }
+  return{total:Math.min(mainKPI+auxBonus,alloc),mainKPI,auxBonus,weighted,rows};
+}
+
+function updateKPIStaff(idx,field,val){data.kpi.staff[idx][field]=val;saveData();}
+
+// KPI分頁新增人員（帶預設角色）
+function addKPIStaff(type){
+  if(!data.kpi)data.kpi={totalBonus:10000,targetCall:1000,targetConnect:450,targetAppoint:48,targetResume:400,actualResume:0,targetFirst:5,targetHire:4,targetReport:4,staff:[]};
+  if(!data.kpi.staff)data.kpi.staff=[];
+  if(type==='phone'){
+    data.kpi.staff.push({name:'新電訪',role:'電訪支援',share:0,auxType:'彈性獎金',auxLimit:500,manualBonus:0,transferCount:0});
+  } else {
+    data.kpi.staff.push({name:'新客服',role:'招募客服',share:0,auxType:'轉掛業務分層獎金',auxLimit:500,transferCount:0});
+  }
+  saveData();
+}
+
+function removeKPIStaff(idx){
+  if(confirm('確定要刪除此人員？')){
+    const name=data.kpi.staff[idx]?.name;
+    // 若為電訪人員，同步移除其電訪記錄
+    if(name&&data.kpi.staff[idx]?.role?.includes('電訪')&&data.phoneRecords?.[name]){
+      delete data.phoneRecords[name];
+    }
+    data.kpi.staff.splice(idx,1);
+    saveData();
+  }
+}
+
+// ===== Modal/Tab =====
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-bg').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});});
+function switchTab(name,btn){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ===== 匯出 Excel =====
+function exportExcel(){
+  const wb=XLSX.utils.book_new();
+  const [y,m]=currentMonth.split('-');
+  const label=`${y}年${+m}月`;
+  const t=getClientTotals(),ph=getPhoneTotals(),ss=getServiceStats(),cStats=getClientServiceStats(),weeks=getWeeks();
+  const allFirst=Object.values(ss).reduce((a,b)=>a+b.first,0);
+  const allReport=Object.values(ss).reduce((a,b)=>a+b.report+(b.transferReport||0),0);
+  const k=data.kpi||{};
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    [label],['派遣招募月績效儀表板'],[],
+    ['月需求','月初試','月錄取','月報到（含跨月）','電訪約訪率','整體達成率','已實現利潤','需求缺口'],
+    [t.req,allFirst,t.hire,allReport,(ph.rate*100).toFixed(1)+'%',t.req>0?(allReport/t.req*100).toFixed(1)+'%':'—',t.realized,t.gap],
+    [],['客戶需求達成狀況'],['客戶','職缺','需求','錄取','報到','達成率','缺口'],
+    ...(data.clients||[]).map(c=>{const key=(c.clientName||'')+'||'+(c.position||'');const cs=cStats[key]||{hire:0,report:0};const req=+c.required||0;return [c.clientName,c.position,req,cs.hire,cs.report,req>0?(cs.report/req*100).toFixed(0)+'%':'—',Math.max(0,req-cs.report)];}),
+    ['合計','',t.req,t.hire,t.rep,'',t.gap],
+    [],['電訪績效（上月26～本月25）合計'],['指標','目標','實績','達成率'],
+    ['電訪量',k.targetCall,ph.call,(ph.call/(k.targetCall||1)*100).toFixed(1)+'%'],
+    ['接通數',k.targetConnect,ph.conn,(ph.conn/(k.targetConnect||1)*100).toFixed(1)+'%'],
+    ['約訪成功',k.targetAppoint,ph.appt,(ph.appt/(k.targetAppoint||1)*100).toFixed(1)+'%'],
+    [],['週別趨勢'],['週次','日期','面談','錄取','報到'],
+    ...weeks.map(w=>[w.label,w.dates,w.interview,w.hire,w.report]),
+  ]),'月績效儀表板');
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    [label],['客戶人力需求管理表'],
+    ['類型','直/間接','客戶名稱','職缺名稱','需求','本月錄取','本月報到','達成率','每名利潤','等級','職缺性質','利潤預估','目標人數','目標金額','缺口','已實現利潤'],
+    ...(data.clients||[]).map(c=>{const key=(c.clientName||'')+'||'+(c.position||'');const cs=cStats[key]||{hire:0,report:0};const req=+c.required||0;return [c.type,c.direct,c.clientName,c.position,req,cs.hire,cs.report,req>0?(cs.report/req*100).toFixed(0)+'%':'—',c.profitPerPerson||0,c.level,c.nature,c.profitEstimate||0,c.targetCount||0,c.targetAmount||0,Math.max(0,req-cs.report),cs.report*(+c.profitPerPerson||0)];}),
+    ['合計','','','',t.req,t.hire,t.rep,'','','','',t.profit,t.targetCount,t.targetAmount,t.gap,t.realized],
+  ]),'客戶需求管理');
+
+  // 電訪記錄（每人一張工作表）
+  const phoneStaff=getPhoneStaff();
+  if(phoneStaff.length>0){
+    // 各人分頁
+    phoneStaff.forEach(s=>{
+      const sPh=getPhoneTotalsForStaff(s.name);
+      const phoneRows=[[label],[`${s.name}（${s.role}）電訪記錄（上月26日～本月25日）`],
+        ['日期','星期','電訪量','接通數','未接/拒接','約訪成功','約訪率','備註']];
+      const sRecs=(data.phoneRecords||{})[s.name]||{};
+      getPhoneRangeDates().forEach(({date,wd,isWeekend})=>{
+        if(isWeekend){phoneRows.push([date.slice(5),wd,'休假','','','','','']);return;}
+        const r=sRecs[date]||{},call=r.callCount||0,conn=r.connected||0,appt=r.appointSuccess||0;
+        phoneRows.push([date.slice(5),wd,call,conn,call-conn,appt,call>0?(appt/call*100).toFixed(1)+'%':'—',r.note||'']);
+      });
+      phoneRows.push(['小計','',sPh.call,sPh.conn,sPh.rejected,sPh.appt,sPh.call>0?(sPh.appt/sPh.call*100).toFixed(1)+'%':'']);
+      const sheetName=s.name.slice(0,20)+'_電訪';
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(phoneRows),sheetName);
+    });
+    // 合計頁（多人時）
+    if(phoneStaff.length>1){
+      const allRows=[[label],['電訪記錄合計（上月26日～本月25日）'],
+        ['日期','星期',...phoneStaff.flatMap(s=>[s.name+'_電訪',s.name+'_接通',s.name+'_約訪']),'合計電訪','合計接通','合計約訪','合計約訪率']];
+      getPhoneRangeDates().forEach(({date,wd,isWeekend})=>{
+        if(isWeekend){allRows.push([date.slice(5),wd,...phoneStaff.flatMap(()=>['休假','','']),'','','','']);return;}
+        let totC=0,totConn=0,totA=0;
+        const cells=[date.slice(5),wd];
+        phoneStaff.forEach(s=>{
+          const r=((data.phoneRecords||{})[s.name]||{})[date]||{};
+          const c=r.callCount||0,cn=r.connected||0,a=r.appointSuccess||0;
+          cells.push(c,cn,a);totC+=c;totConn+=cn;totA+=a;
+        });
+        cells.push(totC,totConn,totA,totC>0?(totA/totC*100).toFixed(1)+'%':'—');
+        allRows.push(cells);
+      });
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(allRows),'電訪記錄合計');
+    }
+  } else {
+    // 無電訪人員時維持單一工作表
+    const phoneRows=[[label],['電訪開發記錄（上月26日～本月25日）'],['日期','星期','電訪量','接通數','未接/拒接','約訪成功','約訪率','備註']];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(phoneRows),'電訪開發記錄');
+  }
+
+  const svcRows=[[label],['招募客服人員月績效記錄'],
+    ['日期','客服人員','求職者','應徵職位','客戶','初試結果','安排複試','錄取結果','報到日期','來源','備註'],
+    ...(data.serviceRecords||[]).map(r=>[r.date,r.staffName,r.candidateName,r.position,r.clientName,r.firstResult,r.arrangeSecond,r.hireResult,r.reportDate,r.source,r.note]),
+    [],['月績效彙總（初試/錄取以面試日；報到以報到日）'],
+    ['人員','初試數','通過初試','安排複試','錄取數','報到數','初試通過率'],
+    ...Object.entries(ss).map(([n,s])=>[n,s.first,s.passFirst,s.second,s.hire,s.report,s.first>0?(s.passFirst/s.first*100).toFixed(0)+'%':'—'])
+  ];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(svcRows),'招募客服績效');
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    [label],['KPI獎金計算'],['本月獎金總額',k.totalBonus],
+    ['人員','角色','份額','分配金額','輔助類型','輔助上限','主KPI上限','本月合計'],
+    ...(k.staff||[]).map((s,i)=>{const alloc=Math.round(k.totalBonus*s.share);const{total}=calcStaffBonus(s,i,ss,k);return [s.name,s.role,(s.share*100).toFixed(0)+'%',alloc,s.auxType,s.auxLimit||0,alloc-(s.auxLimit||0),total];}),
+  ]),'KPI獎金計算');
+
+  XLSX.writeFile(wb,`招募績效管理表_${currentMonth}.xlsx`);
+}
+
+// ===== 初始化：由 onAuthStateChanged 觸發 loadData()，此處不再直接呼叫 =====
+</script>
+</body>
+</html>
