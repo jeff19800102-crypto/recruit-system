@@ -131,6 +131,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
   </div>
   <span class="sync-badge" id="syncBadge">☁ 雲端同步</span>
   <button class="btn btn-success" onclick="exportExcel()">⬇ 匯出 Excel</button>
+  <button class="btn btn-outline" onclick="exportMonthlyReport()" style="border-color:#7c3aed;color:#7c3aed" onmouseover="this.style.background='#f5f3ff'" onmouseout="this.style.background='#fff'">📋 月會報表</button>
   <div class="user-info" id="userInfo" style="display:none">
     <span>👤</span>
     <span class="user-email" id="userEmail"></span>
@@ -1640,6 +1641,96 @@ function exportExcel(){
   ]),'KPI獎金計算');
 
   XLSX.writeFile(wb,`招募績效管理表_${currentMonth}.xlsx`);
+}
+
+// ===== 月會報表匯出 =====
+function exportMonthlyReport(){
+  const wb=XLSX.utils.book_new();
+  const [y,m]=currentMonth.split('-');
+  const label=`${y}年${+m}月`;
+  const cStats=getClientServiceStats();
+
+  // ★ 直接人員關鍵字判斷
+  const DIRECT_KW=['技術員','作業員','操作員','生產員','包裝員','組裝員','維修員'];
+  const isDirectPos=(pos)=>DIRECT_KW.some(kw=>(pos||'').includes(kw));
+
+  const clients=(data.clients||[]).filter(c=>c.clientName&&c.position);
+  const enriched=clients.map(c=>({...c,directType:isDirectPos(c.position)?'直接':'間接'}));
+
+  // 統計摘要
+  const uniqueClients=new Set(clients.map(c=>c.clientName)).size;
+  const totalRequired=clients.reduce((a,c)=>a+(+c.required||0),0);
+
+  // 分組：地區 → 直接/間接 → 客戶名稱 → 職缺清單
+  const regionOrder=[];
+  const regionMap={};
+  enriched.forEach(c=>{
+    const region=c.type||'其他';
+    if(!regionMap[region]){regionMap[region]={};regionOrder.push(region);}
+    const dt=c.directType;
+    if(!regionMap[region][dt])regionMap[region][dt]={};
+    const cn=c.clientName||'';
+    if(!regionMap[region][dt][cn])regionMap[region][dt][cn]=[];
+    regionMap[region][dt][cn].push(c);
+  });
+
+  const aoa=[];
+  const merges=[];
+
+  // 標題列
+  aoa.push([`五、${label}次月客戶需求數`,'','','','','','','','','']);
+  aoa.push(['次月客戶需求數',`${uniqueClients}家`,`${totalRequired}人`,'','','','','','','']);
+  aoa.push(['地區','直接/間接','客戶名稱','職缺名稱','職缺人數','本月錄取人數','本月報到人數','每名利潤','召募等級','職缺性質']);
+  merges.push({s:{r:0,c:0},e:{r:0,c:9}}); // 標題合併
+
+  let r=3;
+  let totalReq=0,totalHire=0,totalReport=0;
+
+  regionOrder.forEach(region=>{
+    const regionStartR=r;
+    ['直接','間接'].forEach(dt=>{
+      if(!regionMap[region][dt])return;
+      const dtStartR=r;
+      Object.entries(regionMap[region][dt]).forEach(([clientName,positions])=>{
+        const clientStartR=r;
+        positions.forEach(c=>{
+          const key=(c.clientName||'')+'||'+(c.position||'');
+          const cs=cStats[key]||{hire:0,report:0};
+          const req=+c.required||0;
+          totalReq+=req; totalHire+=cs.hire; totalReport+=cs.report;
+          aoa.push([
+            r===regionStartR?region:'',
+            r===dtStartR?dt:'',
+            r===clientStartR?clientName:'',
+            c.position||'',
+            req,
+            cs.hire,
+            cs.report,
+            c.profitPerPerson||0,
+            c.level||'',
+            c.nature||''
+          ]);
+          r++;
+        });
+        // 合併同客戶的客戶名稱欄
+        if(positions.length>1) merges.push({s:{r:clientStartR,c:2},e:{r:r-1,c:2}});
+      });
+      // 合併直接/間接欄
+      if(r-dtStartR>1) merges.push({s:{r:dtStartR,c:1},e:{r:r-1,c:1}});
+    });
+    // 合併地區欄
+    if(r-regionStartR>1) merges.push({s:{r:regionStartR,c:0},e:{r:r-1,c:0}});
+  });
+
+  // 合計列
+  aoa.push(['合計','','','',totalReq,totalHire,totalReport,'','','']);
+
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges']=merges;
+  ws['!cols']=[{wch:8},{wch:10},{wch:14},{wch:14},{wch:8},{wch:10},{wch:10},{wch:10},{wch:8},{wch:10}];
+
+  XLSX.utils.book_append_sheet(wb,ws,'月會報表');
+  XLSX.writeFile(wb,`月會報表_${currentMonth}.xlsx`);
 }
 
 // ===== 初始化：由 onAuthStateChanged 觸發 loadData()，此處不再直接呼叫 =====
