@@ -1654,21 +1654,47 @@ async function exportMonthlyReport(){
   const prevMonthStr=`${py}-${String(pm).padStart(2,'0')}`;
   const prevLabel=`${py}年${pm}月`;
 
-  // ★ 載入上月面試記錄，計算每個客戶+職缺的錄取/報到數
+  // ★ 上月服務週期（例如7月 = 6/26~7/25）
+  const ppm2=pm===1?12:pm-1, ppy2=pm===1?py-1:py;
+  const prevPeriodStart=`${ppy2}-${String(ppm2).padStart(2,'0')}-26`;
+  const prevPeriodEnd=`${py}-${String(pm).padStart(2,'0')}-25`;
+  const inPrevPeriod=(d)=>d&&d>=prevPeriodStart&&d<=prevPeriodEnd;
+
+  // ★ 載入上月統計：往前掃5個月的Firestore文件 + 本月，確保跨月記錄不漏
   const prevStats={};
   const ensurePrev=(key)=>{if(!prevStats[key])prevStats[key]={hire:0,report:0};return prevStats[key];};
+  const seenKeys=new Set();
+  const countForPrev=(r)=>{
+    if(!r.clientName||!r.position)return;
+    const dedupKey=`${r.date||''}|${r.candidateName||''}`;
+    if(seenKeys.has(dedupKey))return;
+    seenKeys.add(dedupKey);
+    const key=r.clientName.trim()+'||'+r.position.trim();
+    const s=ensurePrev(key);
+    const hireDateForPrev=r.hireDate||r.date;
+    if(r.hireResult==='錄取'&&inPrevPeriod(hireDateForPrev))s.hire++;
+    if(r.reportDate&&inPrevPeriod(r.reportDate))s.report++;
+  };
   try{
-    const prevDoc=await db.collection('months').doc(prevMonthStr).get();
-    if(prevDoc.exists){
-      (prevDoc.data().serviceRecords||[]).forEach(r=>{
-        if(!r.clientName||!r.position)return;
-        const key=(r.clientName||'')+'||'+(r.position||'');
-        const s=ensurePrev(key);
-        if(r.hireResult==='錄取')s.hire++;
-        if(r.reportDate)s.report++;
-      });
+    // 掃描前5個月（涵蓋所有可能有「上月週期報到/錄取」的跨月記錄）
+    for(let i=1;i<=5;i++){
+      let ty=y,tm=m-i;
+      while(tm<=0){tm+=12;ty--;}
+      const mStr=`${ty}-${String(tm).padStart(2,'0')}`;
+      try{
+        const doc=await db.collection('months').doc(mStr).get();
+        if(doc.exists){
+          const recs=doc.data().serviceRecords||[];
+          recs.forEach(countForPrev);
+          console.log(`[月報] ${mStr} 文件記錄數：${recs.length}`);
+        }
+      }catch(e){console.error(`[月報] 載入${mStr}失敗`,e);}
     }
+    // 本月記錄（已吸收的跨月記錄也在這裡）
+    (data.serviceRecords||[]).forEach(countForPrev);
   }catch(e){console.error('載入上月資料失敗',e);}
+  console.log('[月報] prevStats:', JSON.stringify(prevStats));
+  console.log('[月報] 上月週期:', prevPeriodStart, '~', prevPeriodEnd);
 
   // ★ 直接人員關鍵字判斷
   const DIRECT_KW=['技術員','作業員','操作員','生產員','包裝員','組裝員','維修員'];
@@ -1712,7 +1738,7 @@ async function exportMonthlyReport(){
     Object.entries(dtMap[dt]).forEach(([clientName,positions])=>{
       const clientStartR=r;
       positions.forEach(c=>{
-        const key=(c.clientName||'')+'||'+(c.position||'');
+        const key=(c.clientName||'').trim()+'||'+(c.position||'').trim();
         const ps=prevStats[key]||{hire:0,report:0};
         const req=+c.required||0;
         totalReq+=req; totalHire+=ps.hire; totalReport+=ps.report;
