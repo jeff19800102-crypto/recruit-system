@@ -183,6 +183,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
     <div class="section-header">
       <span class="section-title">📋 客戶人力需求管理</span>
       <div class="flex-gap">
+        <button class="btn btn-outline btn-sm" onclick="resetClientSort()">↺ 回復預設排序</button>
         <button class="btn btn-outline btn-sm" onclick="importLastMonthClients()">📥 帶入上月資料</button>
         <button class="btn btn-primary btn-sm" onclick="openClientModal()">＋ 新增需求</button>
       </div>
@@ -366,6 +367,7 @@ const _now=new Date();
 let currentMonth=`${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}`;
 let data={}, _unsubscribe=null, _saveTimer=null;
 let clientSortField=null, clientSortAsc=true;
+let showPausedClients=false;
 let serviceSortField='date', serviceSortAsc=false;
 const PRESET={};
 let _absorbing=false;
@@ -894,36 +896,69 @@ function sortClients(field){
   updateSortIcons();renderClients();
 }
 
+function resetClientSort(){clientSortField=null;clientSortAsc=true;renderClients();}
+function togglePausedClients(){showPausedClients=!showPausedClients;renderClients();}
+
 function renderClients(){
   updateSortIcons();
   const cStats=getClientServiceStats();
-  let clients=[...(data.clients||[])];
-  if(clientSortField){
-    clients.sort((a,b)=>{let av=a[clientSortField]||0,bv=b[clientSortField]||0;
-      if(typeof av==='string')return clientSortAsc?av.localeCompare(bv):bv.localeCompare(av);
-      return clientSortAsc?av-bv:bv-av;});
-  }
+  const statOf=c=>cStats[(c.clientName||'')+'||'+(c.position||'')]||{hire:0,report:0};
+  const isActive=c=>{const cs=statOf(c);return (+c.required||0)>0||cs.hire>0||cs.report>0;};
+  const isTransfer=c=>c.direct==='轉掛';
+  const groupOf=c=>(isTransfer(c)?2:(c.type==='代徵'?1:0)); // 0 派遣全程 1 代徵全程 2 轉掛
+  const GROUP_LABEL=['派遣・全程','代徵・全程','轉掛'];
+  const defaultCmp=(a,b)=>
+    (groupOf(a)-groupOf(b))||
+    ((a.type==='代徵')-(b.type==='代徵'))||
+    (a.clientName||'').localeCompare(b.clientName||'','zh-Hant')||
+    ((+b.profitPerPerson||0)-(+a.profitPerPerson||0));
+  const userCmp=(a,b)=>{let av=a[clientSortField]||0,bv=b[clientSortField]||0;
+    if(typeof av==='string'||typeof bv==='string'){av=String(av);bv=String(bv);return clientSortAsc?av.localeCompare(bv,'zh-Hant'):bv.localeCompare(av,'zh-Hant');}
+    return clientSortAsc?av-bv:bv-av;};
+  const cmp=clientSortField?userCmp:defaultCmp;
+  const all=[...(data.clients||[])];
+  const active=all.filter(isActive).sort(cmp);
+  const paused=all.filter(c=>!isActive(c)).sort(defaultCmp);
   const body=document.getElementById('clientsBody');if(!body)return;
-  body.innerHTML=clients.map(c=>{
+
+  const rowHtml=(c,pausedRow)=>{
     const i=(data.clients||[]).indexOf(c);
-    const key=(c.clientName||'')+'||'+(c.position||'');
-    const cs=cStats[key]||{hire:0,report:0};
+    const cs=statOf(c);
     const req=+c.required||0,gap=Math.max(0,req-cs.report),realized=cs.report*(+c.profitPerPerson||0);
-    return `<tr>
-      <td>${c.type||''}</td><td>${c.direct==='轉掛'?'<span style="color:#d97706;font-weight:600">轉掛</span>':c.direct||'全程'}</td>
+    const st=pausedRow?' style="color:#9ca3af;background:#fafafa"':'';
+    return `<tr${st}>
+      <td>${c.type||''}</td><td>${isTransfer(c)?`<span style="color:${pausedRow?'#d6b483':'#d97706'};font-weight:600">轉掛</span>`:'全程'}</td>
       <td class="text-left">${c.clientName||''}</td><td class="text-left">${c.position||''}</td>
       <td>${req}</td><td>${cs.hire}</td><td>${cs.report}</td>
       <td>${(+c.profitPerPerson||0).toLocaleString()}</td>
       <td>${c.level||''}</td><td>${c.nature||''}</td>
       <td>${(+c.profitEstimate||0).toLocaleString()}</td>
       <td>${c.targetCount||0}</td><td>${(+c.targetAmount||0).toLocaleString()}</td>
-      <td style="color:${gap>0?'#dc2626':'#16a34a'}">${gap}</td>
+      <td style="color:${pausedRow?'#9ca3af':(gap>0?'#dc2626':'#16a34a')}">${gap}</td>
       <td>${realized.toLocaleString()}</td>
       <td class="action-btns">
         <button class="btn btn-warning btn-sm" onclick="editClient(${i})">編輯</button>
         <button class="btn btn-danger btn-sm" onclick="deleteClient(${i})">刪除</button>
       </td></tr>`;
-  }).join('')||'<tr><td colspan="16" style="color:#94a3b8;font-style:italic;padding:20px">尚無客戶需求，請點選「新增需求」</td></tr>';
+  };
+  const sepRow=(label,extra='',onclick='')=>`<tr${onclick?` onclick="${onclick}" style="cursor:pointer"`:''}><td colspan="16" style="text-align:left;background:#f1f5f9;color:#475569;font-weight:600;font-size:12px;padding:6px 12px">${label}${extra}</td></tr>`;
+
+  let html='';
+  if(!clientSortField){
+    [0,1,2].forEach(g=>{
+      const rows=active.filter(c=>groupOf(c)===g);
+      if(rows.length){html+=sepRow(`${GROUP_LABEL[g]}（${rows.length}）`);html+=rows.map(c=>rowHtml(c,false)).join('');}
+    });
+  }else{
+    html+=active.map(c=>rowHtml(c,false)).join('');
+  }
+  if(paused.length){
+    html+=sepRow(`${showPausedClients?'▾':'▸'} 暫停職缺（${paused.length}）`,
+      `<span style="font-weight:400;color:#94a3b8;margin-left:8px">需求為 0 且本月無錄取、報到；點此${showPausedClients?'收合':'展開'}。編輯需求改為大於 0 即自動回到上方。</span>`,
+      'togglePausedClients()');
+    if(showPausedClients)html+=paused.map(c=>rowHtml(c,true)).join('');
+  }
+  body.innerHTML=html||'<tr><td colspan="16" style="color:#94a3b8;font-style:italic;padding:20px">尚無客戶需求，請點選「新增需求」</td></tr>';
 
   const t=getClientTotals(),footer=document.getElementById('clientsFooter');
   if(footer)footer.innerHTML=`<td colspan="4">合計</td><td>${t.req}</td><td>${t.hire}</td><td>${t.rep}</td><td></td><td></td><td></td><td>${t.profit.toLocaleString()}</td><td>${t.targetCount}</td><td>${t.targetAmount.toLocaleString()}</td><td>${t.gap}</td><td>${t.realized.toLocaleString()}</td><td></td>`;
