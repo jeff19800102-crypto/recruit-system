@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Microsoft JhengHei',Arial,sans-serif;background:#f1f5f9;font-size:14px;color:#1e293b}
@@ -149,6 +150,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
   <button class="tab-btn" onclick="switchTab('phone',this)">📞 電訪記錄</button>
   <button class="tab-btn" onclick="switchTab('service',this)">👥 招募客服</button>
   <button class="tab-btn" onclick="switchTab('kpi',this)">💰 KPI獎金</button>
+  <button class="tab-btn" onclick="switchTab('analysis',this)">📈 經營分析</button>
 </div>
 
 <!-- 儀表板 -->
@@ -306,6 +308,15 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
   </div>
 </div>
 
+<!-- 經營分析 -->
+<div id="tab-analysis" class="tab-content">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <span style="font-size:13px;color:#64748b">以目前選擇的月份為基準，讀取近 8 個月資料計算。給主管與總經理檢視用。</span>
+    <button class="btn btn-outline btn-sm" onclick="loadAnalysis()">↻ 重新整理</button>
+  </div>
+  <div id="anBody"></div>
+</div>
+
 <!-- CLIENT MODAL -->
 <div class="modal-bg" id="clientModal">
   <div class="modal">
@@ -412,7 +423,7 @@ let clientSortField=null, clientSortAsc=true;
 let showPausedClients=false;
 let serviceSortField='date', serviceSortAsc=false;
 let serviceViewFilter='all';
-let pendingRecs=[], editingPendingKey=null;
+let pendingRecs=[], editingPendingKey=null, showPending=false;
 const PRESET={};
 let _absorbing=false;
 let currentPhoneStaff=localStorage.getItem('phoneCurrentStaff')||null;
@@ -1055,6 +1066,7 @@ function applyTransferMode(){
   document.querySelector('#serviceModal .modal').classList.toggle('transfer-mode',!!t);
   document.getElementById('transferHint').style.display=t?'block':'none';
 }
+function togglePending(){showPending=!showPending;renderService();}
 async function loadPendingRecords(){
   pendingRecs=[];
   const [y,m]=currentMonth.split('-').map(Number);
@@ -1270,6 +1282,178 @@ function renderClientStatusBar(){
   const confirm=!data.focusConfirmed?`<div style="margin-top:6px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:6px;padding:6px 10px;font-size:12px">📌 請確認本月「主力招募」職缺（目前 ${cnt['主力招募']} 筆）。確認後按 <button class="btn btn-primary btn-sm" onclick="confirmFocus()">已確認本月主力</button></div>`:'';
   el.innerHTML=chips+(unset?`<span style="font-size:11px;color:#94a3b8">（* 為未設定狀態，暫以持續招募計，共 ${unset} 筆）</span>`:'')+logHtml+confirm;
 }
+// ===== 📈 經營分析（第一版） =====
+const AN_PROFIT_TH=2500;   // 客戶價值矩陣：每名利潤分界（元）
+const AN_FILL_TH=0.5;      // 客戶價值矩陣：填補率分界
+const AN_DEFAULT={show:0.7,pass:0.7,hire:0.6,report:0.85};
+let _anCharts=[];
+function anShift(m,k){let [y,mm]=m.split('-').map(Number);mm-=k;while(mm<=0){mm+=12;y--;}return `${y}-${String(mm).padStart(2,'0')}`;}
+function anCyc(m){const p=anShift(m,1);return [`${p}-26`,`${m}-25`];}
+function anIn(d,m){if(!d)return false;const [a,b]=anCyc(m);return d>=a&&d<=b;}
+function anPct(x){return x==null||isNaN(x)?'—':(x*100).toFixed(0)+'%';}
+function anNum(x){return x==null?'—':Math.round(x).toLocaleString();}
+async function loadAnalysis(){
+  const box=document.getElementById('anBody'); if(!box) return;
+  box.innerHTML='<div style="padding:40px;text-align:center;color:#64748b">讀取近 8 個月資料中…</div>';
+  const M0=currentMonth, months=[...Array(8)].map((_,i)=>anShift(M0,i)); // M0..M-7
+  const docs={};
+  docs[M0]=data;
+  for(const m of months.slice(1)){try{const d=await getMonth(m);docs[m]=d.exists?d.data():null;}catch(e){docs[m]=null;}}
+  // 所有面試記錄（去重）
+  const seen=new Set(), recs=[];
+  months.forEach(m=>{const d=docs[m];if(!d)return;(d.serviceRecords||[]).forEach(r=>{const k=`${r.date}|${r.candidateName||''}|${r.clientName||''}`;if(!seen.has(k)){seen.add(k);recs.push(r);}});});
+  const clientOf=(r,m)=>{
+    for(const mm of [m,...months]){const d=docs[mm];if(!d)continue;const c=(d.clients||[]).find(c=>c.clientName===r.clientName&&c.position===r.position);if(c)return c;}
+    return {};
+  };
+  const isTr=(r,m)=>clientOf(r,m).direct==='轉掛'||r.source==='客戶轉掛';
+  // 每月指標
+  const trendMonths=months.slice(0,6).reverse(); // M-5..M0
+  const T=trendMonths.map(m=>{
+    const d=docs[m]; const o={m,label:+m.slice(5)+'月',has:!!d};
+    const reps=recs.filter(r=>anIn(r.reportDate,m));
+    o.repTr=reps.filter(r=>isTr(r,m)).length; o.repFull=reps.length-o.repTr; o.rep=reps.length;
+    o.profit=reps.reduce((a,r)=>a+(+clientOf(r,m).profitPerPerson||0),0);
+    const full=recs.filter(r=>!isTr(r,m));
+    o.interviews=full.filter(r=>anIn(r.date,m)&&r.firstResult&&r.firstResult!=='未到').length;
+    o.passes=full.filter(r=>anIn(r.date,m)&&r.firstResult==='通過').length;
+    o.hires=full.filter(r=>r.hireResult==='錄取'&&anIn(r.hireDate||r.date,m)).length;
+    o.convHire=o.interviews?o.hires/o.interviews:null;
+    o.convReport=o.hires?Math.min(1,o.repFull/o.hires):null;
+    o.passRate=o.interviews?o.passes/o.interviews:null;
+    o.hireGivenPass=o.passes?Math.min(1,o.hires/o.passes):null;
+    if(d){
+      let call=0,conn=0;Object.values(d.phoneRecords||{}).forEach(st=>Object.values(st||{}).forEach(x=>{call+=x.callCount||0;conn+=x.connected||0;}));
+      o.connRate=call?conn/call:null; o.calls=call;
+      const ap=d.appointments||[]; let came=0,no=0;
+      ap.forEach(a=>{const r=recs.find(x=>x.apptId===a.id);if(r&&r.firstResult==='未到')no++;else if(r&&r.firstResult)came++;});
+      o.showRate=(came+no)?came/(came+no):null;
+      let er=0,ep=0;(d.clients||[]).forEach(c=>{if(!countsInRate(c))return;er+=+c.required||0;ep+=reps.filter(r=>r.clientName===c.clientName&&r.position===c.position).length;});
+      o.effRate=er?ep/er:null;
+      o.mix={};Object.keys(STATUS_COLOR).forEach(k=>o.mix[k]=0);
+      (d.clients||[]).forEach(c=>{const st=c.status||'持續招募';o.mix[st]+=+c.required||0;});
+    }
+    return o;
+  });
+  const cur=T[T.length-1], prev=T[T.length-2];
+  // 轉換率（近 3 個完整月）
+  const last3=T.slice(-4,-1).filter(o=>o.has);
+  const sumk=(k)=>last3.reduce((a,o)=>a+(o[k]||0),0);
+  const rate=(num,den,def)=>{const n=sumk(num),dd=sumk(den);return dd>=3?Math.min(1,n/dd):def;};
+  const P={pass:rate('passes','interviews',AN_DEFAULT.pass),hire:rate('hires','passes',AN_DEFAULT.hire),report:rate('repFull','hires',AN_DEFAULT.report)};
+  const sr=last3.filter(o=>o.showRate!=null); P.show=sr.length?sr.reduce((a,o)=>a+o.showRate,0)/sr.length:AN_DEFAULT.show;
+  // 下月預測：目前 pipeline
+  const open=[...(data.serviceRecords||[]),...pendingRecs.map(p=>p.rec),...crossMonthServiceRecords];
+  const oSeen=new Set(), pipe=[];
+  open.forEach(r=>{const k=`${r.date}|${r.candidateName||''}`;if(oSeen.has(k))return;oSeen.add(k);if(isTr(r,M0)||r.reportDate)return;
+    if(r.firstResult==='未通過'||r.firstResult==='未到'||r.hireResult==='未錄取')return; pipe.push(r);});
+  const stages=[
+    {name:'已錄取、待報到',rows:pipe.filter(r=>r.hireResult==='錄取'),p:P.report},
+    {name:'初試通過、待錄取',rows:pipe.filter(r=>r.firstResult==='通過'&&!r.hireResult),p:P.hire*P.report},
+    {name:'待面試（含約訪）',rows:pipe.filter(r=>!r.firstResult&&!r.hireResult),p:P.show*P.pass*P.hire*P.report},
+  ];
+  stages.forEach(s=>{s.n=s.rows.length;s.exp=s.n*s.p;s.profit=s.rows.reduce((a,r)=>a+(+clientOf(r,M0).profitPerPerson||0),0)*s.p;});
+  const trAvg=last3.length?last3.reduce((a,o)=>a+o.repTr,0)/last3.length:0;
+  const trProfit=last3.length?last3.reduce((a,o)=>{const reps=recs.filter(r=>anIn(r.reportDate,o.m)&&isTr(r,o.m));return a+reps.reduce((b,r)=>b+(+clientOf(r,o.m).profitPerPerson||0),0);},0)/last3.length:0;
+  const fcN=stages.reduce((a,s)=>a+s.exp,0)+trAvg, fcP=stages.reduce((a,s)=>a+s.profit,0)+trProfit;
+  // 首次出現月份（估開缺天數）
+  const firstSeen=(c)=>{let f=null;months.forEach(m=>{const d=docs[m];if(d&&(d.clients||[]).some(x=>x.clientName===c.clientName&&x.position===c.position&&(+x.required||0)>0))f=m;});return f;};
+  const cStats=getClientServiceStats();
+  const days=(c)=>{const d=openDays(c);if(d!=null)return {d,est:false};const f=firstSeen(c);if(!f)return null;return {d:Math.floor((Date.now()-new Date(anCyc(f)[0]).getTime())/864e5),est:true};};
+  const curClients=(data.clients||[]).filter(c=>c.status!=='結案'&&c.direct!=='轉掛');
+  // 警示
+  const A=[];
+  if(cur.rep>=5&&cur.repTr/cur.rep>0.7) A.push(`轉掛佔本月報到 ${anPct(cur.repTr/cur.rep)}（${cur.repTr}/${cur.rep}），主業務（全程）產出偏低。`);
+  let fr=0,fp=0;(data.clients||[]).filter(c=>c.status==='主力招募').forEach(c=>{fr+=+c.required||0;fp+=(cStats[(c.clientName||'')+'||'+(c.position||'')]||{report:0}).report;});
+  if(fr>0&&fp/fr<0.5) A.push(`主力招募職缺達成率 ${anPct(fp/fr)}（報到 ${fp}／需求 ${fr}），低於 50%。`);
+  const longHigh=curClients.filter(c=>{const g=Math.max(0,(+c.required||0)-(cStats[(c.clientName||'')+'||'+(c.position||'')]||{report:0}).report);const dd=days(c);return g>0&&dd&&dd.d>60&&(+c.profitPerPerson||0)>=5000;});
+  if(longHigh.length) A.push(`開缺超過 60 天、每名利潤 5,000 元以上的職缺有 ${longHigh.length} 個（見下方久缺清單）。`);
+  const now=Date.now(); const hiredOld=recs.filter(r=>!isTr(r,M0)&&r.hireResult==='錄取'&&(()=>{const t=(now-new Date(r.hireDate||r.date).getTime())/864e5;return t>=14&&t<=60;})());
+  const noShowHire=hiredOld.filter(r=>!r.reportDate).length;
+  if(hiredOld.length>=3&&noShowHire/hiredOld.length>0.3) A.push(`錄取後未報到偏高：近 14～60 天錄取的 ${hiredOld.length} 人中有 ${noShowHire} 人尚未報到（${anPct(noShowHire/hiredOld.length)}）。`);
+  const totReq=(data.clients||[]).filter(c=>c.status!=='結案').reduce((a,c)=>a+(+c.required||0),0);
+  const hardReq=(data.clients||[]).filter(c=>c.status==='長期招募'||c.status==='待談條件').reduce((a,c)=>a+(+c.required||0),0);
+  if(totReq>0&&hardReq/totReq>0.4) A.push(`長期招募＋待談條件佔需求人數 ${anPct(hardReq/totReq)}，難做的需求比例偏高。`);
+  if(cur.calls>=200&&cur.connRate!=null&&cur.connRate<0.2) A.push(`電訪接通率 ${anPct(cur.connRate)}，低於 20%，建議檢視名單來源與撥打時段。`);
+  const noCond=curClients.filter(c=>!c.salary||!c.shift||!c.location||!c.shuttle).length;
+  // 客戶價值矩陣
+  const byClient={};
+  curClients.forEach(c=>{const k=c.clientName;const o=byClient[k]=byClient[k]||{name:k,req:0,pw:0,maxP:0,gap:0,rep3:0};
+    const req=+c.required||0, p=+c.profitPerPerson||0; o.req+=req; o.pw+=req*p; o.maxP=Math.max(o.maxP,p);
+    o.gap+=Math.max(0,req-(cStats[(c.clientName||'')+'||'+(c.position||'')]||{report:0}).report);});
+  Object.values(byClient).forEach(o=>{o.profit=o.req?o.pw/o.req:o.maxP;o.rep3=recs.filter(r=>r.clientName===o.name&&!isTr(r,M0)&&T.slice(-3).some(t=>anIn(r.reportDate,t.m))).length;o.fill=(o.rep3+o.gap)?o.rep3/(o.rep3+o.gap):null;});
+  const mat=Object.values(byClient).filter(o=>o.fill!=null&&o.profit>0);
+  const quad=o=>o.profit>=AN_PROFIT_TH?(o.fill>=AN_FILL_TH?0:1):(o.fill>=AN_FILL_TH?2:3);
+  const QN=[['核心客戶','維持服務品質，優先保住'],['重點攻堅','利潤高但填不滿：投入資源或談條件'],['量體客戶','好填但利潤低：檢視報價'],['檢討客戶','難填又低利潤：調價或考慮放掉']];
+  const QC=['#1baf7a','#2a78d6','#eda100','#e34948'];
+  // 久缺清單
+  const longList=curClients.map(c=>{const g=Math.max(0,(+c.required||0)-(cStats[(c.clientName||'')+'||'+(c.position||'')]||{report:0}).report);const dd=days(c);
+    const iv=recs.filter(r=>r.clientName===c.clientName&&r.position===c.position&&T.slice(-3).some(t=>anIn(r.date,t.m))).length;
+    return {c,g,dd,iv,pot:g*(+c.profitPerPerson||0)};}).filter(x=>x.g>0&&x.dd&&x.dd.d>=30).sort((a,b)=>b.pot-a.pot).slice(0,10);
+  // ── 畫面 ──
+  const card=(label,val,d,sub)=>`<div class="kpi-card"><div class="label">${label}</div><div class="value">${val}</div><div class="sub">${d}${sub?'　'+sub:''}</div></div>`;
+  const delta=(a,b,fmt)=>a==null||b==null?'上月 —':`上月 ${fmt(b)}　${a>=b?'▲':'▼'} ${fmt(Math.abs(a-b))}`;
+  box.innerHTML=`
+  <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px">
+    ${card('本月報到',cur.rep,delta(cur.rep,prev&&prev.rep,anNum),`全程 ${cur.repFull}／轉掛 ${cur.repTr}`)}
+    ${card('新增月利潤貢獻','$'+anNum(cur.profit),delta(cur.profit,prev&&prev.profit,x=>'$'+anNum(x)),'')}
+    ${card('有效需求達成率',anPct(cur.effRate),delta(cur.effRate,prev&&prev.effRate,anPct),'主力＋持續')}
+    ${card('下月預測報到',fcN.toFixed(1)+' 人','預估利潤 $'+anNum(fcP),'')}
+  </div>
+  <div class="section"><div class="section-header"><span class="section-title">🔔 自動警示</span></div>
+    <div style="padding:10px 16px;font-size:13px;line-height:1.9">${A.length?A.map(t=>`<div style="color:#b91c1c">⚠ ${t}</div>`).join(''):'<div style="color:#15803d">✓ 目前沒有警示</div>'}
+    ${noCond?`<div style="color:#92400e">ⓘ 有 ${noCond} 個全程職缺尚未填職缺條件，填齊後「招不到人的原因」分析才準確。</div>`:''}</div></div>
+  <div class="section"><div class="section-header"><span class="section-title">📈 近 6 個月趨勢</span></div>
+    <div style="padding:6px 16px;font-size:11px;color:#94a3b8">11 月上線前的月份沒有需求狀態、約訪名單等欄位，相關曲線會從上線後開始出現。</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;padding:8px 16px 16px">
+      <div style="position:relative;height:240px"><canvas id="anC1" role="img" aria-label="近六個月報到人數，全程與轉掛"></canvas></div>
+      <div style="position:relative;height:240px"><canvas id="anC2" role="img" aria-label="近六個月新增月利潤貢獻"></canvas></div>
+      <div style="position:relative;height:240px"><canvas id="anC3" role="img" aria-label="近六個月各項轉換率"></canvas></div>
+      <div style="position:relative;height:240px"><canvas id="anC4" role="img" aria-label="近六個月需求狀態組成"></canvas></div>
+    </div></div>
+  <div class="section"><div class="section-header"><span class="section-title">🎯 客戶價值矩陣（全程職缺）</span></div>
+    <div style="padding:6px 16px;font-size:12px;color:#64748b">橫軸：平均每名利潤（對數刻度，分界 ${AN_PROFIT_TH.toLocaleString()} 元）　縱軸：填補率＝近 3 個月報到 ÷（近 3 個月報到＋目前缺口），分界 ${AN_FILL_TH*100}%　圓大小：需求人數</div>
+    <div style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:12px;padding:8px 16px 16px">
+      <div style="position:relative;height:340px"><canvas id="anC5" role="img" aria-label="客戶價值矩陣散佈圖"></canvas></div>
+      <div style="font-size:13px">${QN.map((q,i)=>{const list=mat.filter(o=>quad(o)===i);return `<div style="margin-bottom:10px"><div style="font-weight:700;color:${QC[i]}">■ ${q[0]}（${list.length}）</div><div style="font-size:11px;color:#64748b">${q[1]}</div><div>${list.map(o=>`${o.name}<span style="color:#94a3b8;font-size:11px">（$${anNum(o.profit)}／${anPct(o.fill)}）</span>`).join('、')||'<span style="color:#cbd5e1">—</span>'}</div></div>`;}).join('')}</div>
+    </div></div>
+  <div class="section"><div class="section-header"><span class="section-title">⏳ 久缺高利潤清單（開缺 30 天以上，依潛在月利潤排序）</span></div>
+    <div class="table-wrap"><table><thead><tr><th>客戶</th><th>職缺</th><th>狀態</th><th>開缺天數</th><th>缺口</th><th>每名利潤</th><th>潛在月利潤</th><th>近 3 月面試</th></tr></thead><tbody>
+    ${longList.map(x=>`<tr><td>${x.c.clientName}</td><td>${x.c.position}</td><td>${x.c.status||'持續招募'}</td><td style="color:${x.dd.d>60?'#dc2626':'inherit'};font-weight:${x.dd.d>60?600:400}">${x.dd.est?'≥':''}${x.dd.d}</td><td>${x.g}</td><td>${anNum(+x.c.profitPerPerson||0)}</td><td style="font-weight:600">${anNum(x.pot)}</td><td style="color:${x.iv?'inherit':'#dc2626'}">${x.iv}</td></tr>`).join('')||'<tr><td colspan="8" style="color:#94a3b8;padding:14px">沒有開缺 30 天以上的缺口職缺</td></tr>'}
+    </tbody></table></div>
+    <div style="padding:6px 16px;font-size:11px;color:#94a3b8">開缺天數有「≥」者為舊資料推估（依最早出現的月份計算）；近 3 月面試為 0 代表這個缺沒有在動。</div></div>
+  <div class="section"><div class="section-header"><span class="section-title">🔮 下月報到預測</span></div>
+    <div class="table-wrap"><table><thead><tr><th>來源</th><th>人數</th><th>報到機率</th><th>預估報到</th><th>預估月利潤</th></tr></thead><tbody>
+    ${stages.map(s=>`<tr><td>${s.name}</td><td>${s.n}</td><td>${anPct(s.p)}</td><td>${s.exp.toFixed(1)}</td><td>${anNum(s.profit)}</td></tr>`).join('')}
+    <tr><td>轉掛（近 3 月平均）</td><td>—</td><td>—</td><td>${trAvg.toFixed(1)}</td><td>${anNum(trProfit)}</td></tr>
+    <tr class="tr-total"><td>合計</td><td></td><td></td><td>${fcN.toFixed(1)}</td><td>${anNum(fcP)}</td></tr></tbody></table></div>
+    <div style="padding:6px 16px;font-size:11px;color:#94a3b8">機率取近 3 個月實際轉換率（資料不足時用預設值）：到面 ${anPct(P.show)}、初試通過 ${anPct(P.pass)}、通過後錄取 ${anPct(P.hire)}、錄取後報到 ${anPct(P.report)}。預測為粗估，資料累積越多越準。</div></div>`;
+  // 圖表
+  _anCharts.forEach(c=>c.destroy()); _anCharts=[];
+  if(typeof Chart==='undefined'){box.insertAdjacentHTML('afterbegin','<div style="color:#b91c1c;padding:8px">圖表元件載入失敗，請確認網路。</div>');return;}
+  const L=T.map(o=>o.label), base={responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}}};
+  const mk=(id,cfg)=>_anCharts.push(new Chart(document.getElementById(id),cfg));
+  mk('anC1',{type:'bar',data:{labels:L,datasets:[{label:'全程',data:T.map(o=>o.has?o.repFull:null),backgroundColor:'#2a78d6'},{label:'轉掛',data:T.map(o=>o.has?o.repTr:null),backgroundColor:'#b4b2a9'}]},options:{...base,plugins:{...base.plugins,title:{display:true,text:'報到人數'}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
+  mk('anC2',{type:'line',data:{labels:L,datasets:[{label:'新增月利潤貢獻',data:T.map(o=>o.has?o.profit:null),borderColor:'#eb6834',backgroundColor:'#eb683422',fill:true,tension:.2}]},options:{...base,plugins:{legend:{display:false},title:{display:true,text:'新增月利潤貢獻（元）'}},scales:{y:{beginAtZero:true}}}});
+  const pc=k=>T.map(o=>o[k]==null?null:Math.round(o[k]*100));
+  mk('anC3',{type:'line',data:{labels:L,datasets:[
+    {label:'有效達成率',data:pc('effRate'),borderColor:'#2a78d6'},{label:'面試→錄取',data:pc('convHire'),borderColor:'#1baf7a',borderDash:[6,3]},
+    {label:'錄取→報到',data:pc('convReport'),borderColor:'#6250d6',borderDash:[2,2]},{label:'電訪接通率',data:pc('connRate'),borderColor:'#eda100',borderDash:[8,3,2,3]},
+    {label:'約訪到面率',data:pc('showRate'),borderColor:'#e87ba4',borderDash:[1,4]}].map(d=>({...d,spanGaps:true,tension:.2,pointRadius:3})) },
+    options:{...base,plugins:{...base.plugins,title:{display:true,text:'轉換率（%）'}},scales:{y:{beginAtZero:true,suggestedMax:100}}}});
+  mk('anC4',{type:'bar',data:{labels:L,datasets:Object.keys(STATUS_COLOR).map((k,i)=>({label:k,data:T.map(o=>o.mix?o.mix[k]:null),backgroundColor:['#2a78d6','#b4b2a9','#6250d6','#eda100','#5f5e5a'][i]}))},
+    options:{...base,plugins:{...base.plugins,title:{display:true,text:'需求人數依狀態'}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
+  const quadLines={id:'quad',afterDraw(ch){const {ctx,chartArea:a,scales:{x,y}}=ch;ctx.save();ctx.strokeStyle='#94a3b8';ctx.setLineDash([4,4]);
+    const xv=x.getPixelForValue(AN_PROFIT_TH),yv=y.getPixelForValue(AN_FILL_TH*100);
+    ctx.beginPath();ctx.moveTo(xv,a.top);ctx.lineTo(xv,a.bottom);ctx.moveTo(a.left,yv);ctx.lineTo(a.right,yv);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#334155';ctx.font='11px sans-serif';ch.data.datasets[0].data.forEach(p=>{ctx.fillText(p.name,x.getPixelForValue(p.x)+p.r+3,y.getPixelForValue(p.y)+4);});ctx.restore();}};
+  const xs=mat.map(o=>o.profit); const xmin=Math.min(1000,...xs)/1.6, xmax=Math.max(10000,...xs)*1.6;
+  mk('anC5',{type:'bubble',data:{datasets:[{data:mat.map(o=>({x:o.profit,y:Math.round(o.fill*100),r:5+Math.sqrt(o.req)*3,name:o.name})),backgroundColor:mat.map(o=>QC[quad(o)]+'aa')}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:20},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw.name}：每名 $${anNum(c.raw.x)}，填補率 ${c.raw.y}%`}}},
+      scales:{x:{type:'logarithmic',min:xmin,max:xmax,title:{display:true,text:'平均每名利潤（元）'},ticks:{callback:v=>[1000,2000,3000,5000,10000,20000,50000,100000].includes(v)?v.toLocaleString():''}},
+              y:{min:-10,max:110,title:{display:true,text:'填補率（%）'}}}},plugins:[quadLines]});
+}
+
 function resetClientSort(){clientSortField=null;clientSortAsc=true;renderClients();}
 function togglePausedClients(){showPausedClients=!showPausedClients;renderClients();}
 
@@ -1697,7 +1881,7 @@ function renderService(){
       <td class="text-left" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note||''}">${r.note||''}</td>
       <td class="action-btns"><button class="btn btn-warning btn-sm" onclick="openServiceModal(null,${k})">更新</button></td></tr>`;
   });
-  const pendingHtml=pendingRows.length?`<tr><td colspan="14" style="text-align:left;background:#fef9c3;color:#854d0e;font-weight:600;font-size:12px;padding:6px 12px">⏳ 待追蹤（${pendingRows.length}）<span style="font-weight:400;margin-left:8px">前 2 個月面試、錄取或報到尚未完成；請按「更新」填結果，會寫回原月份，不要另外新增。</span></td></tr>`+pendingRows.join('')+`<tr><td colspan="14" style="text-align:left;background:#f1f5f9;color:#475569;font-weight:600;font-size:12px;padding:6px 12px">本月面試記錄</td></tr>`:'';
+  const pendingHtml=pendingRows.length?`<tr onclick="togglePending()" style="cursor:pointer"><td colspan="14" style="text-align:left;background:#fef9c3;color:#854d0e;font-weight:600;font-size:12px;padding:6px 12px">${showPending?'▾':'▸'} ⏳ 待追蹤（${pendingRows.length}）<span style="font-weight:400;margin-left:8px">前 2 個月面試、錄取或報到尚未完成；點此${showPending?'收合':'展開'}，按「更新」填結果會寫回原月份，不要另外新增。</span></td></tr>`+(showPending?pendingRows.join(''):''):'';
   const sorted=inPeriodRecs;
   const editableRows=sorted.map(({origIdx:i,...r})=>{
     const fb=r.firstResult==='通過'?'badge-pass':r.firstResult==='未通過'?'badge-fail':'badge-wait';
@@ -1757,7 +1941,7 @@ function renderService(){
     body.innerHTML='<tr><td colspan="14" style="color:#94a3b8;font-style:italic;padding:20px">尚無面試記錄，請點選「新增記錄」</td></tr>';
   } else {
     // 可編輯記錄在上，唯讀的「本月報到」記錄在下
-    body.innerHTML=pendingHtml+editableRows.join('')+readonlyRows.join('');
+    body.innerHTML=editableRows.join('')+readonlyRows.join('')+pendingHtml;
   }
 
   // ===== 月績效彙總 =====
@@ -2043,6 +2227,7 @@ function switchTab(name,btn){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   btn.classList.add('active');
+  if(name==='analysis') loadAnalysis();
 }
 
 // ===== 匯出 Excel =====
