@@ -1520,37 +1520,49 @@ async function loadAnalysis(){
 }
 
 // ===== 104 履歷解析（輸入：每行為依 x 排序的文字片段陣列）=====
+const TL_LABELS=['最高學歷','希望職稱','總年資','最近工作','居住地','E-mail','聯絡電話','聯絡方式','應徵日期','就業狀態','工作性質','希望職類','希望地點','遠端工作','希望待遇','可上班日','上班時段','持有駕照','英文姓名','基本資料','產業類別','職務類別','公司規模','工作內容','管理責任','工作技能','語文能力','技能專長','教育背景','個人資料','求職條件','工作經歷','自傳'];
 function tlParse104(lines){
   const N=s=>String(s||'').normalize('NFKC').replace(/\s+/g,' ').trim();
   const L=lines.map(seg=>seg.map(N).filter(Boolean)).filter(seg=>seg.length);
-  const text=L.map(seg=>seg.join(' ')).join('\n');
-  const r={};
-  const val=(label)=>{ // 第一段 = 標籤，取其後內容
-    for(const seg of L){const h=seg[0].replace(/[:：]$/,'');if(h===label&&seg.length>1)return seg.slice(1).join(' ');
-      if(seg[0].startsWith(label+':')||seg[0].startsWith(label+'：'))return N(seg[0].slice(label.length+1)+' '+seg.slice(1).join(' '));}
+  const T=L.map(seg=>seg.join(' '));            // 每行文字
+  const text=T.join('\n');
+  const startsLabel=s=>TL_LABELS.some(l=>s.replace(/\s/g,'').startsWith(l));
+  const val=(label)=>{
+    for(let i=0;i<T.length;i++){
+      const flat=T[i].replace(/\s+/g,' ');
+      if(!flat.replace(/\s/g,'').startsWith(label)) continue;
+      const rest=flat.slice(flat.indexOf(label.at(0))).replace(new RegExp('^'+label.replace(/[-]/g,'\\-')+'\\s*[:：]?\\s*'),'').trim();
+      if(rest) return rest;
+      const nx=T[i+1]||''; if(nx&&!startsLabel(nx)) return nx.trim();
+      return '';
+    }
     return '';
   };
-  // 代碼／年齡／性別行，前一行為姓名
-  const idx=L.findIndex(seg=>seg.some(x=>/代碼[:：]?\s*\d{6,}/.test(x)));
-  if(idx>=0){
-    const row=L[idx].join(' ');
-    r.code=(row.match(/代碼[:：]?\s*(\d{6,})/)||[])[1]||'';
-    r.age=+((row.match(/(\d{2})\s*歲/)||[])[1]||0)||'';
-    r.sex=(row.match(/(男|女)/)||[])[1]||'';
-    if(idx>0) r.name=L[idx-1].join('').replace(/\s/g,'');
-  }
+  const r={};
+  // 代碼／年齡／性別
+  const ci=T.findIndex(x=>/代碼\s*[:：]?\s*\d{6,}/.test(x));
+  const near=ci>=0?[T[ci-1]||'',T[ci],T[ci+1]||''].join(' '):'';
+  r.code=(near.match(/代碼\s*[:：]?\s*(\d{6,})/)||[])[1]||'';
+  r.age=+((near.match(/(\d{2})\s*歲/)||[])[1]||0)||'';
+  r.sex=((ci>=0?T[ci]:'').match(/(?:^|\s)(男|女)(?:\s|$)/)||near.match(/歲\s*(男|女)/)||[])[1]||'';
+  // 姓名：① 代碼那行年齡前的文字 ② 自傳「姓名:」③ 代碼上一行（短字串）
+  let name='';
+  if(ci>=0){const before=T[ci].split(/\d{2}\s*歲/)[0].replace(/\s/g,'');if(before&&before.length<=6&&!/[，。:：]/.test(before))name=before;}
+  if(!name){const m=text.match(/姓名\s*[:：]\s*([^\s\d,，]{2,6})/);if(m)name=m[1];}
+  if(!name&&ci>0){const prev=T[ci-1].replace(/\s/g,'');if(prev.length<=6&&!/[，。:：]/.test(prev))name=prev;}
+  r.name=name;
   r.education=val('最高學歷');r.totalYears=val('總年資');r.recentJob=val('最近工作');
-  r.address=val('居住地');r.email=val('E-mail');
-  r.phone=val('聯絡電話').replace(/[^\d+\-]/g,'');r.contactPref=val('聯絡方式');
-  r.appliedAt=(val('應徵日期').match(/(\d{4})\/(\d{2})\/(\d{2})/)||[]).slice(1).join('-');
+  r.address=val('居住地');r.email=val('E-mail')||((text.match(/[\w.+-]+@[\w-]+\.[\w.]+/)||[])[0]||'');
+  let ph=val('聯絡電話');if(!/\d{8,}/.test(ph.replace(/\D/g,'')))ph=(text.match(/09\d{2}[-\s]?\d{3}[-\s]?\d{3}/)||[])[0]||ph;
+  r.phone=ph.replace(/[^\d+\-]/g,'');r.contactPref=val('聯絡方式');
+  {const m=text.match(/應徵日期\s*[:：]?\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/);r.appliedAt=m?`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`:'';}
   r.jobStatus=val('就業狀態');r.workNature=val('工作性質');
   r.wantTitle=val('希望職稱');r.wantCategory=val('希望職類');r.wantPlace=val('希望地點');
   r.wantSalary=val('希望待遇');r.availableDate=val('可上班日');r.shifts=val('上班時段');r.license=val('持有駕照');
   const m=(r.address||'').match(/([^\d\s]{2}[縣市])([^\d\s]{1,3}?[區鄉鎮市])/);
   r.district=m?m[1]+m[2]:'';
   r.phoneDigits=(r.phone||'').replace(/\D/g,'');
-  // 全文（去掉 104 頁首使用規範）
-  r.resumeText=text.split('\n').filter(l=>!/履歷使用|使用規範|本人同意本履歷|資訊安全|AI服|法定資安|令規定/.test(l)).join('\n');
+  r.resumeText=T.filter(l=>!/履歷使用|使用規範|本人同意本履歷|資訊安全|AI服|法定資安|令規定/.test(l)).join('\n');
   r.ok=!!(r.name&&r.phoneDigits.length>=8);
   return r;
 }
