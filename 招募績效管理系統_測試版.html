@@ -397,7 +397,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
 <div class="modal-bg" id="ctModal">
   <div class="modal" style="width:620px">
     <h2>📝 發送線上簽約</h2>
-    <div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:10px">測試階段：員工可走完整簽約流程，但身分證、帳號等個資不會保存，只記錄簽約狀態與選項。</div>
+    <div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:10px">員工簽完後，伺服器會自動產生已簽署的 PDF 並存放於台灣機房；身分證、帳號等個資只有伺服器可讀取。簽約連結 48 小時內有效。</div>
     <div class="form-grid">
       <div class="form-group"><label>姓名 *</label><input id="ctNameIn"></div>
       <div class="form-group"><label>手機 *</label><input id="ctPhoneIn" inputmode="numeric"><div id="ctPhoneHint" style="font-size:11px;color:#64748b"></div></div>
@@ -2199,6 +2199,23 @@ function ctOpenFromService(i){
   g('ctPhoneHint').textContent=t?'已從人才電訪帶入手機':'人才電訪找不到此人，請手動輸入手機';
   g('ctNo').value='';g('ctDept').value='';g('ctStart').value=r.reportDate||r.date||'';g('ctEnd').value='';g('ctResult').innerHTML='';g('ctSendBtn').style.display='';
   ctPkgChange();ctJobChange();
+  // 已有發出的簽約：帶回原本填的資料，並顯示目前狀態
+  const prev=contracts.filter(c=>c.svcKey===window._ctSvc.key&&c.status!=='void').sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''))[0];
+  if(prev){
+    const j=prev.job||{};
+    if(ctPkgAll()[prev.pkg])g('ctPkg').value=prev.pkg;
+    g('ctNameIn').value=prev.worker.name||g('ctNameIn').value;g('ctPhoneIn').value=prev.worker.phone||g('ctPhoneIn').value;
+    g('ctTitle').value=j.職稱||'';g('ctWage').value=j.時薪||'';g('ctPayDay').value=j.發薪日||'';g('ctNo').value=j.員工編號||'';g('ctDept').value=j.工作部門||'';
+    g('ctStart').value=j.到職日||'';g('ctEnd').value=j.最後工作日||'';if(j.職缺)g('ctJob').value=j.職缺;
+    const st=ctState(prev);
+    const msgBox=st==='signed'?`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:10px">${ctBadge(prev)} <b>${prev.contractNo}</b> 已於 ${(prev.signedAt||'').replace('T',' ')} 簽署完成。${prev.pdfPath?`<a href="${ctPdfUrl(prev)}" target="_blank">📄 開啟 PDF</a>`:''}<br><span style="font-size:12px;color:#475569">如需重簽，請先在列表按「作廢」，再重新發送。</span></div>`
+      :`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:10px">${ctBadge(prev)} <b>${prev.contractNo}</b>　發送 ${(prev.sentAt||'').replace('T',' ')}，連結有效至 ${(prev.expiresAt||'').replace('T',' ')}<br>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="ctCopy('${prev.id}')">📋 複製 LINE 訊息</button> <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ctResend('${prev.id}')">↻ 延長 2 天並複製</button>
+        <div style="font-size:12px;color:#475569;margin-top:6px">下方資料已帶入。若條件有誤要重發：修改後按「產生簽約連結」，舊連結會自動作廢。</div></div>`;
+    g('ctResult').innerHTML=msgBox;
+    if(st==='signed')g('ctSendBtn').style.display='none';
+    window._ctSvc.prevId=st==='signed'?'':prev.id;
+  }
   g('ctModal').classList.add('open');
 }
 function ctPkgChange(){const p=ctPkgAll()[document.getElementById('ctPkg').value];if(!p)return;document.getElementById('ctTitle').value=p.defaults.職稱||'';document.getElementById('ctWage').value=p.defaults.時薪||'';document.getElementById('ctPayDay').value=p.defaults.發薪日||'';}
@@ -2233,6 +2250,7 @@ async function ctCreate(){
   try{
     await db.collection(CT_COL).doc(id).set(c);
     c.id=id;
+    if(sv.prevId)await db.collection(CT_COL).doc(sv.prevId).update({status:'void',voidAt:tlNow(),voidBy:tlStaff(),voidNote:'重新發送 '+c.contractNo}).catch(()=>{});
     if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort||''} ${c.job.職稱}）`}]}).catch(()=>{});
     const msg=ctMessage(c);
     document.getElementById('ctResult').innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px">
