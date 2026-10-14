@@ -8,6 +8,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -250,7 +251,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
     <div class="section-header">
       <span class="section-title">📝 面試記錄</span>
       <span class="svc-filter" style="display:inline-flex;gap:4px;margin-right:8px"><button class="btn btn-outline btn-sm active" data-f="all" onclick="setServiceFilter('all')">全部</button><button class="btn btn-outline btn-sm" data-f="interview" onclick="setServiceFilter('interview')">只看面試</button><button class="btn btn-outline btn-sm" data-f="transfer" onclick="setServiceFilter('transfer')">只看轉掛</button><button class="btn btn-outline btn-sm" data-f="open" onclick="setServiceFilter('open')">只看未結案</button></span>
-      <button class="btn btn-primary btn-sm" onclick="openServiceModal()">＋ 新增記錄</button>
+      <button class="btn btn-outline btn-sm" onclick="ctPkgOpen()">📁 簽約範本</button> <button class="btn btn-primary btn-sm" onclick="openServiceModal()">＋ 新增記錄</button>
     </div>
     <div class="table-wrap"><table id="serviceTable">
       <thead><tr>
@@ -380,6 +381,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
       <button class="btn btn-outline" onclick="closeModal('tlImportModal')">取消</button>
       <button class="btn btn-primary" onclick="tlConfirmImport()">確認匯入</button>
     </div>
+  </div>
+</div>
+<div class="modal-bg" id="ctPkgModal">
+  <div class="modal" style="width:1040px;max-width:96vw">
+    <h2>📁 簽約範本管理</h2>
+    <div style="display:flex;gap:14px;align-items:flex-start">
+      <div style="width:220px;flex:none"><button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:8px" onclick="ctPkgNew()">＋ 新增簽約包</button><div id="ctPkgList"></div></div>
+      <div id="ctPkgEditor" style="flex:1;min-width:0"></div>
+    </div>
+    <input type="file" id="ctPkgFile" accept=".docx" style="display:none" onchange="ctPkgUpload(this.files[0])">
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('ctPkgModal')">關閉</button></div>
   </div>
 </div>
 <div class="modal-bg" id="ctModal">
@@ -2133,7 +2145,15 @@ const CT_PKGS = {
 };
 const CT_STATUS = {sent:['已發送','#2563eb'], opened:['已開啟','#d97706'], signed:['已簽署','#15803d'], void:['已作廢','#6b7280'], expired:['已過期','#dc2626']};
 let contracts = [], ctUnsub = null;
+// 簽約包：資料庫中「啟用」的簽約包；若一個都沒有，使用內建的蓋世威示範
+function ctPkgAll(){
+  const out={};
+  Object.values(typeof ctPkgs!=='undefined'?ctPkgs:{}).filter(p=>p.active).forEach(p=>{const co=CT_COMPANIES[p.company]||{};
+    out[p.id]={name:p.name,company:co.name,short:co.short,prefix:co.prefix,client:p.client,clientShort:p.keyword||p.name,defaults:p.defaults||{},docs:p.docs||[]};});
+  return Object.keys(out).length?out:CT_PKGS;
+}
 function ctInit(){
+  if(typeof ctPkgInit==='function') ctPkgInit();
   if(ctUnsub) return;
   ctUnsub = db.collection(CT_COL).onSnapshot(s=>{contracts=[];s.forEach(d=>contracts.push({id:d.id,...d.data()}));
       ctRefreshSvc();},
@@ -2145,7 +2165,7 @@ function ctLink(c){return location.href.replace(/[?#].*$/,'').replace(/[^/]*$/,'
 function ctMd(d){const [,m,dd]=(d||'').slice(0,10).split('-');return d?`${+m}/${+dd}`:'';}
 function ctMessage(c){
   const p=CT_PKGS[c.pkg]||{};
-  return `${c.worker.name}您好，恭喜錄取${p.clientShort||c.job.要派公司}${c.job.職稱}（${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}）。\n請在 ${ctMd(c.expiresAt)} ${c.expiresAt.slice(11,16)} 前點下方連結完成線上簽約（約 5 分鐘）：\n${ctLink(c)}\n如有問題請來電 04-2452-6670。`;
+  return `${c.worker.name}您好，恭喜錄取${c.clientShort||p.clientShort||c.job.要派公司}${c.job.職稱}（${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}）。\n請在 ${ctMd(c.expiresAt)} ${c.expiresAt.slice(11,16)} 前點下方連結完成線上簽約（約 5 分鐘）：\n${ctLink(c)}\n如有問題請來電 04-2452-6670。`;
 }
 // ── 招募客服：每列的簽約按鈕與狀態 ──
 function ctSvcKey(r){return [r.candidateName||'',r.clientName||'',r.position||'',r.date||''].join('|');}
@@ -2168,7 +2188,8 @@ function ctOpenFromService(i){
   const t=(typeof talents!=='undefined'?talents:[]).find(x=>(x.name||'')===(r.candidateName||''));
   window._ctSvc={key:ctSvcKey(r),talentId:t?t.id:''};
   const g=id=>document.getElementById(id);
-  g('ctPkg').innerHTML=Object.entries(CT_PKGS).map(([k,p])=>`<option value="${k}" ${(r.clientName||'').includes(p.clientShort)?'selected':''}>${p.name}</option>`).join('');
+  const P=ctPkgAll();
+  g('ctPkg').innerHTML=Object.entries(P).map(([k,p])=>`<option value="${k}" ${p.clientShort&&(r.clientName||'').includes(p.clientShort)?'selected':''}>${p.name}</option>`).join('');
   const jobs=(data.clients||[]).filter(c=>c.status!=='結案'&&c.direct!=='轉掛');
   const pre=(r.clientName||'')+'||'+(r.position||'');
   g('ctJob').innerHTML='<option value="">（不指定）</option>'+jobs.map(c=>{const v=c.clientName+'||'+c.position;return `<option value="${v}" ${v===pre?'selected':''}>${c.clientName}／${c.position}</option>`;}).join('');
@@ -2178,7 +2199,7 @@ function ctOpenFromService(i){
   ctPkgChange();ctJobChange();
   g('ctModal').classList.add('open');
 }
-function ctPkgChange(){const p=CT_PKGS[document.getElementById('ctPkg').value];document.getElementById('ctTitle').value=p.defaults.職稱;document.getElementById('ctWage').value=p.defaults.時薪;document.getElementById('ctPayDay').value=p.defaults.發薪日;}
+function ctPkgChange(){const p=ctPkgAll()[document.getElementById('ctPkg').value];if(!p)return;document.getElementById('ctTitle').value=p.defaults.職稱||'';document.getElementById('ctWage').value=p.defaults.時薪||'';document.getElementById('ctPayDay').value=p.defaults.發薪日||'';}
 function ctJobChange(){
   const v=document.getElementById('ctJob').value;if(!v)return;const [cn,pos]=v.split('||');
   const c=(data.clients||[]).find(x=>x.clientName===cn&&x.position===pos);if(!c)return;
@@ -2191,7 +2212,7 @@ async function ctCreate(){
   const g=id=>document.getElementById(id).value.trim();
   const sv=window._ctSvc||{};const t=sv.talentId?talents.find(x=>x.id===sv.talentId):null;
   const wName=g('ctNameIn'),wPhone=g('ctPhoneIn').normalize('NFKC').replace(/\D/g,'');
-  const pkgId=g('ctPkg'),p=CT_PKGS[pkgId];
+  const pkgId=g('ctPkg'),p=ctPkgAll()[pkgId];if(!p){alert('請選擇簽約包');return;}
   const miss=[['ctNo','員工編號'],['ctTitle','職稱'],['ctWage','時薪'],['ctStart','到職日'],['ctEnd','最後工作日']].filter(([id])=>!g(id)).map(x=>x[1]);
   if(!wName)miss.push('姓名');if(!/^09\d{8}$/.test(wPhone))miss.push('正確的手機（09 開頭 10 碼）');
   if(miss.length){alert('請先填寫：'+miss.join('、'));return;}
@@ -2202,13 +2223,15 @@ async function ctCreate(){
   const c={pkg:pkgId,talentId:t?t.id:'',svcKey:sv.key||'',contractNo:`${p.prefix}-${today}-${String(seq).padStart(4,'0')}`,company:p.company,
     worker:{name:wName,phone:wPhone},
     job:{要派公司:p.client,職稱:g('ctTitle'),時薪:g('ctWage'),發薪日:g('ctPayDay'),員工編號:g('ctNo'),工作部門:g('ctDept'),到職日:g('ctStart'),最後工作日:g('ctEnd'),職缺:g('ctJob')},
+    clientShort:p.clientShort||'',
+    pkgSnap:p.docs&&p.docs.length?{name:p.name,client:p.client,docs:p.docs.map(d=>({name:d.name,fileId:d.fileId,optional:d.optional||null,tags:d.tags||[],text:d.text||[]}))}:null,
     status:'sent',sentAt:tlNow(),sentBy:tlStaff(),expiresAt:ctAddHours(48),test:IS_TEST};
   const id=ctToken();
   showLoading(true);
   try{
     await db.collection(CT_COL).doc(id).set(c);
     c.id=id;
-    if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort} ${c.job.職稱}）`}]}).catch(()=>{});
+    if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort||''} ${c.job.職稱}）`}]}).catch(()=>{});
     const msg=ctMessage(c);
     document.getElementById('ctResult').innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px">
       <b>已產生簽約連結</b>（${c.contractNo}，48 小時內有效）<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${msg}</textarea>
@@ -2220,6 +2243,136 @@ async function ctCreate(){
 function ctCopy(id){const c=contracts.find(x=>x.id===id);if(!c)return;navigator.clipboard.writeText(ctMessage(c)).then(()=>alert('已複製 LINE 訊息，請貼給員工。'));}
 async function ctResend(id){const c=contracts.find(x=>x.id===id);if(!c)return;await db.collection(CT_COL).doc(id).update({expiresAt:ctAddHours(48),status:c.status==='opened'?'opened':'sent'});ctCopy(id);}
 async function ctVoid(id){if(!confirm('確定作廢這份簽約連結？作廢後員工將無法再開啟。'))return;await db.collection(CT_COL).doc(id).update({status:'void',voidAt:tlNow(),voidBy:tlStaff()});}
+
+// ===== 簽約範本管理：簽約包設定、Word 範本上傳與欄位檢查 =====
+const PKG_COL = IS_TEST ? 'test_ct_packages' : 'ct_packages';
+const FILE_COL = IS_TEST ? 'test_ct_files' : 'ct_files';
+const CT_COMPANIES = {
+  xinya:  {name:'信亞人力派遣股份有限公司', short:'信亞', prefix:'XY'},
+  panasia:{name:'汎亞國際人事顧問股份有限公司', short:'汎亞', prefix:'PA'}
+};
+const CT_DATE_KEYS = ['到職日','最後工作日','生日','簽署日'];
+const CT_FIELDS = [
+  ['員工資料（員工填寫）', ['員工姓名','性別','身分證字號','生日_民國','手機','市話','通訊地址','Email','銀行','分行','帳號','帳戶說明']],
+  ['工作資料（招募客服填寫）', ['員工編號','要派公司','職稱','工作部門','時薪','發薪日','到職日_民國年','到職日_月','到職日_日','到職日_民國','最後工作日_民國年','最後工作日_月','最後工作日_日','最後工作日_民國']],
+  ['員工選項', ['勞退自提']],
+  ['簽署', ['簽名','簽署日_民國年','簽署日_月','簽署日_日','簽署日_民國']],
+  ['勾選框（□／■）', ['chk:性別=男','chk:性別=女','chk:帳戶類型=郵局','chk:帳戶類型=其它','chk:健保=依附父母','chk:健保=其他單位','chk:離職原因=（原因文字）']]
+];
+const CT_CHK_FIELDS = ['性別','帳戶類型','健保','離職原因'];
+let ctPkgs = {}, ctAdmins = ['jeff'], ctPkgUnsub = null, ctPkgEdit = null;
+function ctPkgInit(){
+  if(ctPkgUnsub) return;
+  ctPkgUnsub = db.collection(PKG_COL).onSnapshot(s=>{ctPkgs={};s.forEach(d=>{if(d.id==='_settings'){ctAdmins=(d.data().admins||['jeff']);}else ctPkgs[d.id]={id:d.id,...d.data()};});
+    if(document.getElementById('ctPkgModal').classList.contains('open'))ctPkgRenderList();}, e=>console.error(e));
+}
+function ctMe(){const u=auth.currentUser;return u?(u.email||'').split('@')[0]:'';}
+function ctIsAdmin(){return ctAdmins.includes(ctMe());}
+function ctKnownTag(t){
+  if(t.startsWith('chk:')){const k=t.slice(4).split('=')[0];return CT_CHK_FIELDS.includes(k);}
+  const flat=CT_FIELDS.flatMap(g=>g[1]);if(flat.includes(t))return true;
+  return CT_DATE_KEYS.some(k=>[k+'_民國年',k+'_月',k+'_日',k+'_民國'].includes(t));
+}
+// ── 開啟管理視窗 ──
+function ctPkgOpen(){
+  ctPkgInit();
+  if(!ctIsAdmin()){alert(`「簽約範本管理」只開放指定人員使用（目前：${ctAdmins.join('、')}）。`);return;}
+  document.getElementById('ctPkgModal').classList.add('open');
+  ctPkgRenderList();
+  if(!ctPkgEdit) document.getElementById('ctPkgEditor').innerHTML='<div style="color:#94a3b8;padding:30px;text-align:center">左側選擇簽約包，或按「＋ 新增簽約包」</div>';
+}
+function ctPkgRenderList(){
+  const list=Object.values(ctPkgs).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  document.getElementById('ctPkgList').innerHTML=list.map(p=>`<div onclick="ctPkgSelect('${p.id}')" style="padding:8px 10px;border-radius:8px;cursor:pointer;margin-bottom:4px;${ctPkgEdit&&ctPkgEdit.id===p.id?'background:#dbeafe;':'background:#f8fafc;'}">
+     <div style="font-weight:600;font-size:13px">${p.name||'(未命名)'}</div>
+     <div style="font-size:11px;color:#64748b">${(CT_COMPANIES[p.company]||{}).short||''}・${(p.docs||[]).length} 份文件・${p.active?'<span style="color:#15803d">啟用</span>':'<span style="color:#94a3b8">停用</span>'}</div></div>`).join('')||'<div style="font-size:13px;color:#94a3b8">尚無簽約包</div>';
+}
+function ctPkgNew(){ctPkgEdit={id:'p'+Date.now().toString(36),name:'',company:'xinya',client:'',keyword:'',defaults:{職稱:'',時薪:'',發薪日:'10'},docs:[],active:false,_new:true};ctPkgRenderEditor();ctPkgRenderList();}
+function ctPkgSelect(id){ctPkgEdit=JSON.parse(JSON.stringify(ctPkgs[id]));ctPkgRenderEditor();ctPkgRenderList();}
+function ctPkgRenderEditor(){
+  const p=ctPkgEdit, esc=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const inp=(id,label,val,ph='')=>`<div class="form-group"><label>${label}</label><input id="${id}" value="${esc(val)}" placeholder="${ph}"></div>`;
+  const docRow=(d,i)=>{
+    const bad=(d.tags||[]).filter(t=>!ctKnownTag(t));
+    return `<tr><td>${i+1}</td><td><input value="${esc(d.name)}" onchange="ctPkgEdit.docs[${i}].name=this.value.trim()" style="width:150px"></td>
+      <td style="font-size:12px;text-align:left">${esc(d.fileName)}<br><span style="color:#64748b">${Math.round((d.size||0)/1024)} KB・${(d.tags||[]).length} 個欄位</span>
+        ${bad.length?`<br><span style="color:#dc2626">⚠ 不認得：${bad.map(esc).join('、')}</span>`:''}
+        ${!(d.tags||[]).includes('簽名')?'<br><span style="color:#d97706">⚠ 沒有 {{簽名}}，這份不會出現簽名</span>':''}</td>
+      <td><select onchange="ctPkgEdit.docs[${i}].optional=this.value?{field:'健保',in:['依附父母','其他單位']}:null">
+        <option value="" ${!d.optional?'selected':''}>每次都簽</option><option value="nhi" ${d.optional?'selected':''}>只在健保選「不加保」時簽</option></select></td>
+      <td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="ctPkgMove(${i},-1)">↑</button><button class="btn btn-outline btn-sm" onclick="ctPkgMove(${i},1)">↓</button>
+        <button class="btn btn-outline btn-sm" onclick="ctPkgShowTags(${i})">欄位</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('ctPkgFile').dataset.replace='${i}';document.getElementById('ctPkgFile').click()">更換</button>
+        <button class="btn btn-outline btn-sm" style="color:#dc2626" onclick="if(confirm('移除這份文件？'))ctPkgEdit.docs.splice(${i},1),ctPkgRenderEditor()">移除</button></td></tr>`;};
+  document.getElementById('ctPkgEditor').innerHTML=`
+    <div class="form-grid">
+      ${inp('cpName','簽約包名稱 *',p.name,'例：蓋世威 PT 工讀生')}
+      <div class="form-group"><label>甲方公司 *</label><select id="cpCompany">${Object.entries(CT_COMPANIES).map(([k,c])=>`<option value="${k}" ${p.company===k?'selected':''}>${c.name}</option>`).join('')}</select></div>
+      ${inp('cpClient','要派企業全名',p.client,'例：英屬百慕達商蓋世威國際有限公司台灣分公司')}
+      ${inp('cpKeyword','客戶關鍵字（自動選取用）',p.keyword,'例：蓋世威')}
+      ${inp('cpTitle','預設職稱',p.defaults.職稱)}${inp('cpWage','預設時薪',p.defaults.時薪)}${inp('cpPay','發薪日（每月幾號）',p.defaults.發薪日)}
+      <div class="form-group"><label>狀態</label><label style="font-weight:400"><input type="checkbox" id="cpActive" ${p.active?'checked':''}> 啟用（招募客服發送簽約時可選）</label></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 6px"><b>文件（依簽署順序）</b>
+      <span><button class="btn btn-outline btn-sm" onclick="ctPkgFieldHelp()">📋 欄位代碼清單</button>
+      <button class="btn btn-success btn-sm" onclick="delete document.getElementById('ctPkgFile').dataset.replace;document.getElementById('ctPkgFile').click()">＋ 上傳 Word 檔</button></span></div>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>文件名稱</th><th>檔案與欄位檢查</th><th>何時要簽</th><th></th></tr></thead>
+      <tbody>${(p.docs||[]).map(docRow).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:14px">尚未上傳文件</td></tr>'}</tbody></table></div>
+    <div id="ctPkgHelp"></div>
+    <div style="font-size:12px;color:#64748b;margin-top:6px">只接受 .docx（Word 2007 以後格式），每份 700 KB 以內。舊的 .doc 請先用 Word「另存新檔」成 .docx。欄位代碼要完整打在同一段文字裡，例如 {{員工姓名}}。</div>
+    <div class="modal-footer" style="padding:12px 0 0">${!p._new?`<button class="btn btn-outline" style="color:#dc2626;margin-right:auto" onclick="ctPkgDelete()">刪除簽約包</button>`:''}
+      <button class="btn btn-primary" onclick="ctPkgSave()">儲存</button></div>`;
+}
+function ctPkgMove(i,d){const a=ctPkgEdit.docs,j=i+d;if(j<0||j>=a.length)return;[a[i],a[j]]=[a[j],a[i]];ctPkgRenderEditor();}
+function ctPkgShowTags(i){const d=ctPkgEdit.docs[i];document.getElementById('ctPkgHelp').innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:8px;font-size:12px"><b>${d.name}</b> 找到的欄位：<br>${(d.tags||[]).map(t=>`<span style="display:inline-block;margin:2px;padding:1px 6px;border-radius:6px;background:${ctKnownTag(t)?'#dcfce7':'#fee2e2'}">{{${t}}}</span>`).join('')}</div>`;}
+function ctPkgFieldHelp(){
+  document.getElementById('ctPkgHelp').innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:8px;font-size:12px">
+    <b>欄位代碼清單</b>（點一下複製，貼到 Word 的空白處）<br>${CT_FIELDS.map(([g,ks])=>`<div style="margin-top:6px"><span style="color:#64748b">${g}：</span>${ks.map(k=>`<span onclick="navigator.clipboard.writeText('{{${k}}}');this.style.background='#bbf7d0'" style="cursor:pointer;display:inline-block;margin:2px;padding:1px 6px;border-radius:6px;background:#e0e7ff">{{${k}}}</span>`).join('')}</div>`).join('')}
+    <div style="margin-top:6px;color:#64748b">日期欄位：_民國年／_月／_日 分開放，或用 _民國 一次放「115年10月20日」。勾選框代碼會變成 ■ 或 □，例如「{{chk:性別=男}}男 {{chk:性別=女}}女」。離職原因的「（原因文字）」換成實際原因，例如 {{chk:離職原因=家庭因素}}。</div></div>`;
+}
+// ── 上傳 Word：解析欄位 ──
+async function ctPkgUpload(file){
+  if(!file)return;
+  const inp=document.getElementById('ctPkgFile'), rep=inp.dataset.replace; inp.value='';
+  if(!/\.docx$/i.test(file.name)){alert('只接受 .docx 檔。舊的 .doc 請先用 Word「另存新檔」成 .docx。');return;}
+  if(file.size>700*1024){alert(`檔案 ${Math.round(file.size/1024)} KB，超過 700 KB。可以把 Word 裡的圖片壓縮後再上傳。`);return;}
+  if(typeof JSZip==='undefined'){alert('解析元件載入失敗，請重新整理後再試。');return;}
+  showLoading(true);
+  try{
+    const buf=await file.arrayBuffer(), zip=await JSZip.loadAsync(buf);
+    const parts=Object.keys(zip.files).filter(n=>/^word\/(document|header\d*|footer\d*)\.xml$/.test(n));
+    const paras=[];
+    for(const n of parts){const x=await zip.file(n).async('string');
+      (x.match(/<w:p[ >][\s\S]*?<\/w:p>/g)||[]).forEach(p=>{const t=(p.match(/<w:t[^>]*>[^<]*<\/w:t>/g)||[]).map(s=>s.replace(/<[^>]+>/g,'')).join('')
+        .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"');if(t.trim()&&n==='word/document.xml')paras.push(t);});}
+    const all=paras.join('\n');const tags=[...new Set([...all.matchAll(/\{\{([^}]+)\}\}/g)].map(m=>m[1].trim()))];
+    const b64=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(String(fr.result).split(',')[1]);fr.readAsDataURL(file);});
+    const fileId='f'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    await db.collection(FILE_COL).doc(fileId).set({pkgId:ctPkgEdit.id,fileName:file.name,size:file.size,b64,uploadedAt:tlNow(),by:ctMe()});
+    const doc={fileId,fileName:file.name,size:file.size,tags,text:paras.slice(0,500),name:(rep!==undefined&&ctPkgEdit.docs[rep])?ctPkgEdit.docs[rep].name:file.name.replace(/\.docx$/i,'').replace(/^\d+_/,''),
+      optional:(rep!==undefined&&ctPkgEdit.docs[rep])?ctPkgEdit.docs[rep].optional:(tags.some(t=>t.startsWith('chk:健保='))?{field:'健保',in:['依附父母','其他單位']}:null)};
+    if(rep!==undefined&&ctPkgEdit.docs[rep])ctPkgEdit.docs[rep]=doc;else ctPkgEdit.docs.push(doc);
+    ctPkgRenderEditor();ctPkgShowTags(rep!==undefined?+rep:ctPkgEdit.docs.length-1);
+  }catch(e){console.error(e);alert('上傳失敗：'+(e.code||e.message));}
+  finally{showLoading(false);}
+}
+async function ctPkgSave(){
+  const g=id=>document.getElementById(id).value.trim(), p=ctPkgEdit;
+  p.name=g('cpName');p.company=document.getElementById('cpCompany').value;p.client=g('cpClient');p.keyword=g('cpKeyword');
+  p.defaults={職稱:g('cpTitle'),時薪:g('cpWage'),發薪日:g('cpPay')};p.active=document.getElementById('cpActive').checked;
+  if(!p.name){alert('請填簽約包名稱');return;}
+  if(p.active&&!p.docs.length){alert('至少要上傳一份文件才能啟用');return;}
+  const {_new,id,...save}=p;save.updatedAt=tlNow();save.updatedBy=ctMe();
+  showLoading(true);
+  try{await db.collection(PKG_COL).doc(id).set(save);delete p._new;ctPkgRenderEditor();alert('已儲存');}
+  catch(e){alert('儲存失敗：'+(e.code||e.message));}finally{showLoading(false);}
+}
+async function ctPkgDelete(){
+  const p=ctPkgEdit;if(!confirm(`刪除簽約包「${p.name}」？已發出的簽約不受影響。`))return;
+  await db.collection(PKG_COL).doc(p.id).delete();
+  for(const d of p.docs||[])db.collection(FILE_COL).doc(d.fileId).delete().catch(()=>{});
+  ctPkgEdit=null;ctPkgOpen();
+}
 
 async function recopyFromProd(){
   if(!confirm(`將用正式版「${currentMonth}」的最新資料，覆蓋測試版本月資料。\n\n・測試期間新增的約訪名單會保留\n・人才電訪的通話紀錄不受影響，有撥打紀錄的日子會重新自動計算\n・其他在測試版手動修改的數字會被取代\n\n確定要複製嗎？`))return;
