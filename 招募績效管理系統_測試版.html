@@ -387,7 +387,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
     <h2>📝 發送線上簽約</h2>
     <div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:10px">測試階段：員工可走完整簽約流程，但身分證、帳號等個資不會保存，只記錄簽約狀態與選項。</div>
     <div class="form-grid">
-      <div class="form-group full"><label>人員</label><div id="ctName" style="font-weight:600"></div></div>
+      <div class="form-group"><label>姓名 *</label><input id="ctNameIn"></div>
+      <div class="form-group"><label>手機 *</label><input id="ctPhoneIn" inputmode="numeric"><div id="ctPhoneHint" style="font-size:11px;color:#64748b"></div></div>
       <div class="form-group full"><label>要派企業／簽約包</label><select id="ctPkg" onchange="ctPkgChange()"></select></div>
       <div class="form-group full"><label>職缺（選填，帶入職稱與時薪）</label><select id="ctJob" onchange="ctJobChange()"></select></div>
       <div class="form-group"><label>職稱 *</label><input id="ctTitle"></div>
@@ -2085,7 +2086,7 @@ function tlOpenProfile(id){
         ${f('希望職稱',t.wantTitle)}${f('希望職類',t.wantCategory)}${f('希望地點',t.wantPlace)}${f('希望待遇',t.wantSalary)}${f('上班時段',t.shifts)}${f('可上班日',t.availableDate)}${f('就業狀態',t.jobStatus)}${f('居住地',t.address)}${f('駕照',t.license)}${f('最近工作',t.recentJob)}${f('總年資',t.totalYears)}${f('最高學歷',t.education)}${f('Email',t.email)}${f('應徵日期',t.appliedAt)}
         ${t.dg?`<div style="font-weight:600;font-size:14px;margin:10px 0 4px;color:#0891b2">打工趣資料</div>${f('應徵職缺',t.dgJob)}${f(t.dgQ?t.dgQ.replace(/[?？]$/,''):'',t.dgA)}${f('出席／缺席',`${t.dgAttend||0} 次／<span style="color:${+t.dgAbsent>0?'#dc2626':'inherit'}">${t.dgAbsent||0} 次</span>`)}${t.dgExp?`<pre style="white-space:pre-wrap;font-size:12px;background:#f0f9ff;padding:8px;border-radius:6px;max-height:200px;overflow:auto">${t.dgExp.replace(/</g,'&lt;')}</pre>`:''}`:''}
         ${t.resumeText?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#2563eb">完整履歷內容</summary><pre style="white-space:pre-wrap;font-size:12px;background:#f8fafc;padding:8px;border-radius:6px;max-height:320px;overflow:auto">${t.resumeText.replace(/</g,'&lt;')}</pre></details>`:''}</div>
-      <div>${typeof ctProfileHtml==='function'?ctProfileHtml(t):''}<div style="font-weight:600;font-size:14px;margin:10px 0 4px">互動時間軸</div>${tl||'<div style="color:#94a3b8">尚無紀錄</div>'}</div>
+      <div><div style="font-weight:600;font-size:14px;margin-bottom:4px">互動時間軸</div>${tl||'<div style="color:#94a3b8">尚無紀錄</div>'}</div>
     </div>`;
   document.getElementById('tlProfileModal').classList.add('open');
 }
@@ -2135,7 +2136,7 @@ let contracts = [], ctUnsub = null;
 function ctInit(){
   if(ctUnsub) return;
   ctUnsub = db.collection(CT_COL).onSnapshot(s=>{contracts=[];s.forEach(d=>contracts.push({id:d.id,...d.data()}));
-      const m=document.getElementById('tlProfileModal');if(m&&m.classList.contains('open')&&window._ctProfileId)ctRenderProfileList(window._ctProfileId);},
+      ctRefreshSvc();},
     e=>{console.error(e);});
 }
 function ctState(c){if(c.status==='signed'||c.status==='void')return c.status;if(c.expiresAt&&c.expiresAt<tlNow())return 'expired';return c.status||'sent';}
@@ -2146,33 +2147,34 @@ function ctMessage(c){
   const p=CT_PKGS[c.pkg]||{};
   return `${c.worker.name}您好，恭喜錄取${p.clientShort||c.job.要派公司}${c.job.職稱}（${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}）。\n請在 ${ctMd(c.expiresAt)} ${c.expiresAt.slice(11,16)} 前點下方連結完成線上簽約（約 5 分鐘）：\n${ctLink(c)}\n如有問題請來電 04-2452-6670。`;
 }
-// 個人頁：簽約區塊
-function ctProfileHtml(t){
-  window._ctProfileId=t.id;
-  return `<div style="font-weight:600;font-size:14px;margin:10px 0 4px">線上簽約 <button class="btn btn-outline btn-sm" style="margin-left:6px" onclick="ctOpenSend('${t.id}')">📝 發送簽約</button></div><div id="ctList_${t.id}">${ctListHtml(t.id)}</div>`;
+// ── 招募客服：每列的簽約按鈕與狀態 ──
+function ctSvcKey(r){return [r.candidateName||'',r.clientName||'',r.position||'',r.date||''].join('|');}
+function ctSvcBtn(r,i){
+  ctInit();
+  if(r.hireResult!=='錄取')return '';
+  const k=ctSvcKey(r);
+  return `<button class="btn btn-sm" style="background:#0e7490;color:#fff" onclick="ctOpenFromService(${i})">📝 簽約</button><span data-ctkey="${encodeURIComponent(k)}" style="display:block;margin-top:2px">${ctSvcStatus(k)}</span>`;
 }
-function ctListHtml(tid){
-  const list=contracts.filter(c=>c.talentId===tid).sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''));
-  if(!list.length) return '<div style="font-size:13px;color:#94a3b8">尚未發送</div>';
-  return list.map(c=>`<div style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;margin:4px 0;font-size:13px">
-    ${ctBadge(c)} <b>${(CT_PKGS[c.pkg]||{}).clientShort||''} ${c.job.職稱}</b> ${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}　<span style="color:#64748b">${c.contractNo}</span><br>
-    <span style="color:#64748b">發送 ${(c.sentAt||'').replace('T',' ')} ${c.sentBy||''}${c.openedAt?'　開啟 '+c.openedAt.replace('T',' '):''}${c.signedAt?'　簽署 '+c.signedAt.replace('T',' '):''}</span>
-    ${c.status==='signed'&&c.opts?`<br><span style="color:#334155">健保：${c.opts.健保}　勞退自提：${c.opts.勞退}%${(c.opts.離職原因||[]).length?'　離職原因：'+c.opts.離職原因.join('、'):''}</span>`:''}
-    ${['sent','opened','expired'].includes(ctState(c))?`<br><button class="btn btn-outline btn-sm" onclick="ctCopy('${c.id}')">📋 複製 LINE 訊息</button> <button class="btn btn-outline btn-sm" onclick="ctResend('${c.id}')">↻ 延長 2 天</button> <button class="btn btn-outline btn-sm" style="color:#dc2626" onclick="ctVoid('${c.id}')">作廢</button>`:''}
-  </div>`).join('');
+function ctSvcStatus(k){
+  const list=contracts.filter(c=>c.svcKey===k&&c.status!=='void').sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''));
+  if(!list.length)return '';
+  const c=list[0];
+  return `${ctBadge(c)}${['sent','opened','expired'].includes(ctState(c))?` <a href="javascript:ctCopy('${c.id}')" style="font-size:11px">複製</a> <a href="javascript:ctResend('${c.id}')" style="font-size:11px">延長</a> <a href="javascript:ctVoid('${c.id}')" style="font-size:11px;color:#dc2626">作廢</a>`:''}${c.status==='signed'&&c.opts?`<div style="font-size:10px;color:#475569;white-space:nowrap">健保 ${c.opts.健保}・勞退 ${c.opts.勞退}%</div>`:''}`;
 }
-function ctRenderProfileList(tid){const el=document.getElementById('ctList_'+tid);if(el)el.innerHTML=ctListHtml(tid);}
-// 發送視窗
-function ctOpenSend(tid){
-  const t=talents.find(x=>x.id===tid);if(!t)return;
-  window._ctFor=tid;
+function ctRefreshSvc(){document.querySelectorAll('[data-ctkey]').forEach(el=>{el.innerHTML=ctSvcStatus(decodeURIComponent(el.dataset.ctkey));});}
+function ctOpenFromService(i){
+  const r=(data.serviceRecords||[])[i];if(!r)return;
+  if(typeof tlInit==='function')tlInit();
+  const t=(typeof talents!=='undefined'?talents:[]).find(x=>(x.name||'')===(r.candidateName||''));
+  window._ctSvc={key:ctSvcKey(r),talentId:t?t.id:''};
   const g=id=>document.getElementById(id);
-  g('ctPkg').innerHTML=Object.entries(CT_PKGS).map(([k,p])=>`<option value="${k}">${p.name}</option>`).join('');
+  g('ctPkg').innerHTML=Object.entries(CT_PKGS).map(([k,p])=>`<option value="${k}" ${(r.clientName||'').includes(p.clientShort)?'selected':''}>${p.name}</option>`).join('');
   const jobs=(data.clients||[]).filter(c=>c.status!=='結案'&&c.direct!=='轉掛');
-  const pre=t.targetJob?t.targetJob.clientName+'||'+t.targetJob.position:'';
+  const pre=(r.clientName||'')+'||'+(r.position||'');
   g('ctJob').innerHTML='<option value="">（不指定）</option>'+jobs.map(c=>{const v=c.clientName+'||'+c.position;return `<option value="${v}" ${v===pre?'selected':''}>${c.clientName}／${c.position}</option>`;}).join('');
-  g('ctName').textContent=`${t.name||''}　${t.phone||''}`;
-  g('ctNo').value='';g('ctDept').value='';g('ctStart').value='';g('ctEnd').value='';g('ctResult').innerHTML='';g('ctSendBtn').style.display='';
+  g('ctNameIn').value=r.candidateName||'';g('ctPhoneIn').value=t?(t.phone||t.phoneDigits||''):'';
+  g('ctPhoneHint').textContent=t?'已從人才電訪帶入手機':'人才電訪找不到此人，請手動輸入手機';
+  g('ctNo').value='';g('ctDept').value='';g('ctStart').value=r.reportDate||r.date||'';g('ctEnd').value='';g('ctResult').innerHTML='';g('ctSendBtn').style.display='';
   ctPkgChange();ctJobChange();
   g('ctModal').classList.add('open');
 }
@@ -2187,17 +2189,18 @@ function ctToken(){const a=new Uint8Array(18);crypto.getRandomValues(a);return A
 function ctAddHours(h){const d=new Date(Date.now()+h*3600e3);const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;}
 async function ctCreate(){
   const g=id=>document.getElementById(id).value.trim();
-  const t=talents.find(x=>x.id===window._ctFor);if(!t)return;
+  const sv=window._ctSvc||{};const t=sv.talentId?talents.find(x=>x.id===sv.talentId):null;
+  const wName=g('ctNameIn'),wPhone=g('ctPhoneIn').normalize('NFKC').replace(/\D/g,'');
   const pkgId=g('ctPkg'),p=CT_PKGS[pkgId];
   const miss=[['ctNo','員工編號'],['ctTitle','職稱'],['ctWage','時薪'],['ctStart','到職日'],['ctEnd','最後工作日']].filter(([id])=>!g(id)).map(x=>x[1]);
-  if(!t.phoneDigits||t.phoneDigits.length<10)miss.push('人才資料的手機');
+  if(!wName)miss.push('姓名');if(!/^09\d{8}$/.test(wPhone))miss.push('正確的手機（09 開頭 10 碼）');
   if(miss.length){alert('請先填寫：'+miss.join('、'));return;}
   if(g('ctEnd')<g('ctStart')){alert('最後工作日不能早於到職日。');return;}
   if(+g('ctWage')<196&&!confirm('時薪低於基本工資時薪 196 元，確定嗎？'))return;
   const today=tlToday().replace(/-/g,'');
   const seq=contracts.filter(c=>(c.contractNo||'').startsWith(`${p.prefix}-${today}`)).length+1;
-  const c={pkg:pkgId,talentId:t.id,contractNo:`${p.prefix}-${today}-${String(seq).padStart(4,'0')}`,company:p.company,
-    worker:{name:t.name||'',phone:t.phoneDigits},
+  const c={pkg:pkgId,talentId:t?t.id:'',svcKey:sv.key||'',contractNo:`${p.prefix}-${today}-${String(seq).padStart(4,'0')}`,company:p.company,
+    worker:{name:wName,phone:wPhone},
     job:{要派公司:p.client,職稱:g('ctTitle'),時薪:g('ctWage'),發薪日:g('ctPayDay'),員工編號:g('ctNo'),工作部門:g('ctDept'),到職日:g('ctStart'),最後工作日:g('ctEnd'),職缺:g('ctJob')},
     status:'sent',sentAt:tlNow(),sentBy:tlStaff(),expiresAt:ctAddHours(48),test:IS_TEST};
   const id=ctToken();
@@ -2205,7 +2208,7 @@ async function ctCreate(){
   try{
     await db.collection(CT_COL).doc(id).set(c);
     c.id=id;
-    await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort} ${c.job.職稱}）`}]}).catch(()=>{});
+    if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort} ${c.job.職稱}）`}]}).catch(()=>{});
     const msg=ctMessage(c);
     document.getElementById('ctResult').innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px">
       <b>已產生簽約連結</b>（${c.contractNo}，48 小時內有效）<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${msg}</textarea>
@@ -2679,6 +2682,7 @@ function renderService(){
       <td class="action-btns">
         <button class="btn btn-warning btn-sm" onclick="editService(${i})">編輯</button>
         <button class="btn btn-danger btn-sm" onclick="deleteService(${i})">刪除</button>
+        ${typeof ctSvcBtn==='function'?ctSvcBtn(r,i):''}
       </td></tr>`;
   });
 
