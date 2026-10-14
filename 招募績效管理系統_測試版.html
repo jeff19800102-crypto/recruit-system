@@ -1654,6 +1654,18 @@ function tlIsPT(c){return c&&c.workType==='PT／短期';}
 function tlWantsFull(t){const w=(t.screening&&t.screening.workNature)||[];if(w.length)return w.includes('全職');if(t.dg&&!t.code)return false;if(t.workNature&&!/全職/.test(t.workNature))return false;return true;}
 function tlWantsPT(t){const w=(t.screening&&t.screening.workNature)||[];if(w.length)return w.includes('PT／短期');return tlTags(t).length>0;}
 let tlTagFilter='';
+function tlShortJob(j){return String(j||'').replace(/-\d{2,3}$/,'').replace(/\/?時薪\s*\d+\s*元?/,'').replace(/\/+$/,'').trim();}
+const tlEsc=v=>String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function tlWantCell(t){if(t.wantTitle)return tlEsc(t.wantTitle);if(!t.dg)return '';const sj=tlShortJob(t.dgJob);return `<span title="${tlEsc(t.dgJob)}" style="font-size:12px"><span style="color:#0891b2">打工趣</span> ${tlEsc(sj.length>18?sj.slice(0,18)+'…':sj)}</span>`;}
+function tlAreaCell(t){if(t.district)return tlEsc(t.district);if(!t.dg||!t.dgA)return '';const a=t.dgA;return `<span title="${tlEsc((t.dgQ||'')+' '+a)}" style="font-size:12px">${tlEsc(a.length>12?a.slice(0,12)+'…':a)}</span>`;}
+// 打工趣職缺名稱 → 客戶需求職缺（自動指定）
+function tlAutoJob(dgJob){
+  const N=x=>String(x||'').normalize('NFKC').replace(/[\s\-\/()（）【】\[\]]/g,'').toUpperCase();const d=N(dgJob);if(!d)return null;
+  const sc=(data.clients||[]).filter(c=>c.status!=='結案'&&c.direct!=='轉掛'&&c.position).map(c=>{const cn=N(c.clientName),pn=N(c.position);
+    const pos=pn&&d.includes(pn)?2:0;const name=cn&&(d.includes(cn)||(cn.length>=2&&d.includes(cn.slice(0,2))))?1:0;return {c,v:pos+name+(c.workType==='PT／短期'&&pos?0.5:0)};}).filter(x=>x.v>=2).sort((a,b)=>b.v-a.v);
+  if(!sc.length||(sc[1]&&sc[1].v===sc[0].v))return null;
+  return {clientName:sc[0].c.clientName,position:sc[0].c.position};
+}
 function tlTagOK(t){return !tlTagFilter||tlTags(t).includes(tlTagFilter);}
 function tlInit(){
   if(tlUnsub) return;
@@ -1762,12 +1774,12 @@ function renderTalent(){
   const jobTxt=t=>t.targetJob&&t.targetJob.clientName?t.targetJob.clientName+'／'+t.targetJob.position:'<span style="color:#cbd5e1">未指定</span>';
   const row=(t,mode,extra)=>{const L=tlLast(t);const n=tlCalls(t).length;const fl=tlFlags(t);
     return `<tr><td style="text-align:left"><a href="javascript:tlOpenProfile('${t.id}')" style="font-weight:600;color:#1e40af">${t.name||'?'}</a>${tlRatingBadge(t.rating)}${tlTagBadges(t)} <span style="color:#94a3b8;font-size:11px">${t.age||''}${t.sex?'・'+t.sex:''}</span>${t.group?`<span style="font-size:10px;color:#7c3aed;margin-left:4px">${t.group==='night'?'晚上組':'白天組'}</span>`:''}${fl.length?`<br><span style="font-size:11px;color:#dc2626">⚠ ${fl.join('、')}</span>`:''}</td>
-      <td>${t.phone||''}</td><td style="text-align:left">${t.wantTitle||(t.dg?'<span style="font-size:11px;color:#0891b2">打工趣：'+(t.dgJob||'')+'</span>':'')}</td><td>${t.district||(t.dg?'<span style="font-size:11px">'+(t.dgA||'')+'</span>':'')}</td><td style="text-align:left;font-size:12px">${t.shifts||''}</td>
+      <td>${t.phone||''}</td><td style="text-align:left">${tlWantCell(t)}</td><td>${tlAreaCell(t)}</td><td style="text-align:left;font-size:12px">${t.shifts||''}</td>
       <td>${t.appliedAt?tlDays(t.appliedAt)+' 天':''}</td><td>${n}</td>
       <td style="font-size:12px">${mode==='due'?`<span style="color:${t.nextContact<today?'#dc2626':'#475569'}">${t.nextContact.replace('T',' ')}</span><br>`:''}${L?tlResult(L.result).label:'—'}</td>
       <td style="font-size:12px">${extra||jobTxt(t)}</td>
       <td><button class="btn btn-primary btn-sm" onclick="tlStartCall('${t.id}'${mode==='rec'?`,'${encodeURIComponent((extra||'').replace(/<[^>]+>/g,''))}'`:''})">📞 開始</button></td></tr>`;};
-  const head=(last)=>`<thead><tr><th>姓名</th><th>手機</th><th>希望職稱</th><th>居住區</th><th>上班時段</th><th>投遞</th><th>撥過</th><th>上次結果</th><th>${last||'指定職缺'}</th><th></th></tr></thead>`;
+  const head=(last)=>`<thead><tr><th>姓名</th><th>手機</th><th>應徵／希望</th><th>居住區／可配合</th><th>上班時段</th><th>投遞</th><th>撥過</th><th>上次結果</th><th>${last||'指定職缺'}</th><th></th></tr></thead>`;
   const sect=(title,list,mode,last,rowsHtml)=>`<div class="section"><div class="section-header"><span class="section-title">${title}（${list.length}）</span></div>
     <div class="table-wrap"><table>${head(last)}<tbody>${rowsHtml||list.map(t=>row(t,mode)).join('')||`<tr><td colspan="10" style="color:#94a3b8;padding:14px">目前沒有</td></tr>`}</tbody></table></div></div>`;
   const recRows=rec.list.map(x=>row(x.t,'rec',`<strong>${x.c.clientName}／${x.c.position}</strong><br><span style="color:#15803d">${x.m.reasons.join('、')}</span>`)).join('')
@@ -1794,8 +1806,8 @@ function renderTalent(){
   <div class="section"><div class="section-header" onclick="tlShowDiag=!tlShowDiag;renderTalent()" style="cursor:pointer"><span class="section-title">${tlShowDiag?'▾':'▸'} 📊 接通率診斷</span></div>${tlShowDiag?tlDiagHtml():''}</div>
   <div class="section"><div class="section-header" onclick="tlShowAll=!tlShowAll;renderTalent()" style="cursor:pointer"><span class="section-title">${tlShowAll?'▾':'▸'} 全部人才（${talents.length}）</span>
     <span style="font-size:12px;color:#64748b">${Object.entries(cnt).map(([k,v])=>`${k} ${v}`).join('　')}</span></div>
-    ${tlShowAll?`<div class="table-wrap"><table><thead><tr><th>姓名</th><th>手機</th><th>狀態</th><th>希望職稱</th><th>居住區</th><th>撥過</th><th>上次結果</th><th>下次聯繫</th><th>匯入日</th></tr></thead><tbody>
-      ${all.slice(0,300).map(t=>{const L=tlLast(t);return `<tr><td style="text-align:left"><a href="javascript:tlOpenProfile('${t.id}')" style="color:#1e40af">${t.name||'?'}</a>${tlRatingBadge(t.rating)}${tlTagBadges(t)}</td><td>${t.phone||''}</td><td>${t.status||''}</td><td style="text-align:left">${t.wantTitle||''}</td><td>${t.district||''}</td><td>${tlCalls(t).length}</td><td style="font-size:12px">${L?tlResult(L.result).label:(t.footprintResult||'—')}</td><td style="font-size:12px">${(t.nextContact||'').replace('T',' ')}</td><td style="font-size:12px">${(t.lastImportAt||'').slice(0,10)}</td></tr>`;}).join('')}
+    ${tlShowAll?`<div class="table-wrap"><table><thead><tr><th>姓名</th><th>手機</th><th>狀態</th><th>應徵／希望</th><th>居住區／可配合</th><th>撥過</th><th>上次結果</th><th>下次聯繫</th><th>匯入日</th></tr></thead><tbody>
+      ${all.slice(0,300).map(t=>{const L=tlLast(t);return `<tr><td style="text-align:left"><a href="javascript:tlOpenProfile('${t.id}')" style="color:#1e40af">${t.name||'?'}</a>${tlRatingBadge(t.rating)}${tlTagBadges(t)}</td><td>${t.phone||''}</td><td>${t.status||''}</td><td style="text-align:left">${tlWantCell(t)}</td><td>${tlAreaCell(t)}</td><td>${tlCalls(t).length}</td><td style="font-size:12px">${L?tlResult(L.result).label:(t.footprintResult||'—')}</td><td style="font-size:12px">${(t.nextContact||'').replace('T',' ')}</td><td style="font-size:12px">${(t.lastImportAt||'').slice(0,10)}</td></tr>`;}).join('')}
     </tbody></table></div>`:''}</div>`;
 }
 function tlAddLine(){const v=prompt('輸入撥出門號（例：04-2222-3333）');if(!v)return;const l=tlLines();if(!l.includes(v.trim()))l.push(v.trim());localStorage.setItem('tlLines',JSON.stringify(l));localStorage.setItem('tlLineToday',v.trim());renderTalent();}
@@ -1833,7 +1845,7 @@ function tlParseDgPaste(){
   if(!rows.length){document.getElementById('tlImportPreview').innerHTML='<div style="color:#b91c1c;padding:8px">沒有解析到應徵者。請在打工趣的應徵者頁面（選「全部」）按 Ctrl+A、Ctrl+C 後再貼上。</div>';return;}
   tlImportRows=rows.map(p=>{const ex=p.ok?tlFindExisting(p):null;
     const kind=p.dgRejected?'rej':!p.ok?'fail':ex?(ex.status==='不要再聯繫'?'stop':'old'):'new';
-    return {file:'打工趣：'+(p.dgJob||''),p,ex,kind,err:p.dgAbsent>0?`⚠ 打工趣缺席 ${p.dgAbsent} 次`:''};});
+    return {file:'打工趣：'+(p.dgJob||''),p,ex,kind,autoJob:tlAutoJob(p.dgJob),err:p.dgAbsent>0?`⚠ 打工趣缺席 ${p.dgAbsent} 次`:''};});
   tlRenderPreview();
 }
 function tlOpenImport(){
@@ -1880,7 +1892,7 @@ function tlRenderPreview(){
       <td><input value="${r.p.name||''}" onchange="tlImportRows[${i}].p.name=this.value.trim();tlRecheck(${i})" style="width:80px"></td>
       <td><input value="${r.p.phone||''}" onchange="tlImportRows[${i}].p.phone=this.value.trim();tlImportRows[${i}].p.phoneDigits=this.value.replace(/\\D/g,'');tlRecheck(${i})" style="width:110px"></td>
       <td style="font-size:12px">${r.p.wantTitle||(r.p.dg?(r.p.dgA?'可配合：'+r.p.dgA:''):'')}</td><td style="font-size:12px">${r.p.appliedAt||''}</td>
-      <td style="color:${c};font-weight:600;font-size:12px">${t}${memo?`<br><span style="font-weight:400;color:#64748b">${memo}</span>`:''}${r.err?'<br>'+r.err:''}</td></tr>`;}).join('');
+      <td style="color:${c};font-weight:600;font-size:12px">${t}${memo?`<br><span style="font-weight:400;color:#64748b">${memo}</span>`:''}${r.err?'<br>'+r.err:''}${r.autoJob?`<br><span style="font-weight:400;color:#0891b2">自動指定：${r.autoJob.clientName}／${r.autoJob.position}</span>`:(r.p.dg&&!r.kind.match(/rej|stop/)?'<br><span style="font-weight:400;color:#94a3b8">對不到客戶需求職缺，請用上方下拉選</span>':'')}</td></tr>`;}).join('');
   const ok=tlImportRows.filter(r=>r.kind==='new'||r.kind==='old').length;
   document.getElementById('tlImportPreview').innerHTML=`<div class="table-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th>檔名</th><th>姓名</th><th>手機</th><th>希望職稱</th><th>應徵日</th><th>判斷</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div style="margin-top:8px;font-size:13px">可匯入 <strong>${ok}</strong> 筆；解析不完整的請補上姓名與手機後即可匯入。</div>`;
@@ -1898,10 +1910,10 @@ async function tlConfirmImport(){
       const group=split?(Math.random()<0.5?'day':'night'):null;
       if(r.kind==='new'){
         const id=p.code?'c'+p.code:'p'+p.phoneDigits;
-        await tlSave({id,...p,status:'新匯入',owner:st,targetJob,attempts:0,nextContact:null,group,firstImportAt:now,lastImportAt:now,timeline:[{at:now,type:'import',by:st,note:p.dg?`打工趣應徵：${p.dgJob||''}`:'匯入履歷'}]});
+        await tlSave({id,...p,status:'新匯入',owner:st,targetJob:targetJob||r.autoJob||null,attempts:0,nextContact:null,group,firstImportAt:now,lastImportAt:now,timeline:[{at:now,type:'import',by:st,note:p.dg?`打工趣應徵：${p.dgJob||''}`:'匯入履歷'}]});
       }else{
         const t=r.ex;const reopen=['人才庫','聯絡不到','聯繫中','足跡'].includes(t.status);
-        await tlSave({...t,...p,targetJob:targetJob||t.targetJob||null,lastImportAt:now,group:t.group||group,
+        await tlSave({...t,...p,targetJob:targetJob||r.autoJob||t.targetJob||null,lastImportAt:now,group:t.group||group,
           status:reopen?'新匯入':t.status,attempts:reopen?0:t.attempts,nextContact:reopen?null:t.nextContact,
           timeline:[...(t.timeline||[]),{at:now,type:'import',by:st,note:p.dg?`打工趣應徵：${p.dgJob||''}`:t.status==='足跡'?`重新投遞（足跡：${t.footprintResult||''}）`:'重新投遞，履歷已更新'}]});
       }
@@ -2066,7 +2078,7 @@ function tlExportCSV(){
   const list=talents.filter(t=>t.status==='新匯入'||(['聯繫中','人才庫'].includes(t.status)&&t.nextContact&&t.nextContact<=endToday));
   if(!list.length){alert('目前沒有待撥名單。');return;}
   const head=['talentId','姓名','手機','希望職稱','居住區','上班時段','指定職缺','上次結果'];
-  const rows=list.map(t=>[t.id,t.name,t.phone,t.wantTitle,t.district,t.shifts,t.targetJob?t.targetJob.clientName+'／'+t.targetJob.position:'',(tlLast(t)?tlResult(tlLast(t).result).label:'')]);
+  const rows=list.map(t=>[t.id,t.name,t.phone,t.wantTitle||tlShortJob(t.dgJob),t.district||t.dgA||'',t.shifts,t.targetJob?t.targetJob.clientName+'／'+t.targetJob.position:'',(tlLast(t)?tlResult(tlLast(t).result).label:'')]);
   const csv='﻿'+[head,...rows].map(r=>r.map(tlCsvCell).join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`待撥名單_${tlToday()}.csv`;a.click();
 }
