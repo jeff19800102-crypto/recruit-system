@@ -314,8 +314,8 @@ async function boot(){
     if(!d.pkgSnap||!d.pkgSnap.docs||!d.pkgSnap.docs.length){stopPage('此連結需要重新發送','這份簽約建立時尚未設定文件範本，無法產生文件。請聯絡招募人員重新發送簽約連結（04-2452-6670）。');return;}
     LIVE={ref};
     if(d.pkgSnap&&d.pkgSnap.docs){
-      const fdb=firebase.firestore();
-      const texts=await Promise.all(d.pkgSnap.docs.map(async x=>{if(x.text&&x.text.length)return x.text;try{const f=await fdb.collection(FILE_COL).doc(x.fileId).get();return f.exists?(f.data().text||[]):[];}catch(e){return [];}}));
+      let texts=d.pkgSnap.docs.map(x=>x.text||[]);
+      try{const r=await fetch(SERVICE+'/texts?'+(CT_COL==='test_contracts'?'test=1&':'')+'t='+t);const j=await r.json();if(j.ok&&j.docs)texts=d.pkgSnap.docs.map((x,i)=>(j.docs[i]&&j.docs[i].text&&j.docs[i].text.length)?j.docs[i].text:(x.text||[]));}catch(e){console.error(e);}
       PKG={documents:d.pkgSnap.docs.map((x,i)=>({name:x.name,when:x.optional||null,tags:x.tags||[],text:texts[i]}))};PREVIEW={};
       REASONS=[...new Set(allTags().filter(t=>t.startsWith('chk:離職原因=')).map(t=>t.split('=')[1]))];}
     C={contractNo:d.contractNo,company:d.company,short:(d.company||'').slice(0,2),phoneOffice:'04-2452-6670',worker:d.worker,expiresAt:d.expiresAt,job:d.job};

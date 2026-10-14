@@ -183,6 +183,35 @@ def pdf():
     fn = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', 'contract')) or 'contract'
     return Response(data, mimetype='application/pdf', headers={'Content-Disposition': f'attachment; filename={fn}.pdf'})
 
+@app.route('/texts', methods=['GET', 'OPTIONS'])
+def texts():
+    """簽署頁顯示用：依連結代碼回傳各文件的段落文字（直接從 Word 檔抽取）"""
+    if request.method == 'OPTIONS': return ('', 204)
+    mode = 'test' if request.args.get('test') else 'prod'
+    ccol, fcol, _ = COLS[mode]
+    token = request.args.get('t', '')
+    if not valid_token(token): return err('連結無效', 400)
+    snap = db.collection(ccol).document(token).get()
+    if not snap.exists: return err('找不到簽約資料', 404)
+    c = snap.to_dict()
+    if c.get('status') not in ('sent', 'opened', 'signing'): return err('這份簽約已完成或已作廢', 409)
+    out = []
+    for x in ((c.get('pkgSnap') or {}).get('docs') or []):
+        f = db.collection(fcol).document(x.get('fileId', '')).get()
+        paras = []
+        if f.exists:
+            try:
+                import docx as _docx
+                from docx_tools import iter_paragraphs
+                d = _docx.Document(io.BytesIO(base64.b64decode(f.to_dict()['b64'])))
+                paras = [p.text for p in iter_paragraphs(d) if p.text.strip()][:400]
+            except Exception:
+                log.exception('texts failed %s', x.get('fileId'))
+        out.append({'name': x.get('name', ''), 'text': paras})
+    resp = jsonify({'ok': True, 'docs': out})
+    resp.headers['Cache-Control'] = 'private, max-age=300'
+    return resp
+
 @app.get('/')
 def health():
     return 'ok'

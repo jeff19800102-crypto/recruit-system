@@ -1683,7 +1683,7 @@ function tlAddDays(n,hour){const d=new Date();d.setDate(d.getDate()+n);const p=x
 function tlStaff(){return currentPhoneStaff||'';}
 function tlStaffOK(){if(tlStaff())return true;alert('請先在上方選擇「撥打人員」。');return false;}
 function tlLines(){try{return JSON.parse(localStorage.getItem('tlLines')||'[]');}catch(e){return [];}}
-function tlLine(){const v=localStorage.getItem('tlLineToday')||'';const d=localStorage.getItem('tlLineDate')||'';return d===tlToday()?v:'';}
+function tlLine(){return '';}
 function tlSetLine(v){localStorage.setItem('tlLineToday',v);localStorage.setItem('tlLineDate',tlToday());}
 function tlResult(k){return TL_RESULTS.find(x=>x.k===k)||{label:k};}
 function tlCalls(t){return (t.timeline||[]).filter(e=>e.type==='call');}
@@ -1843,7 +1843,6 @@ function renderTalent(){
   const todayCalls=talents.flatMap(t=>tlCalls(t).filter(c=>(c.at||'').startsWith(today)&&c.by===st));
   const conn=todayCalls.filter(c=>tlResult(c.result).conn).length, appt=todayCalls.filter(c=>c.result==='APPT').length;
   const staffOpts=getPhoneStaff().map(s=>`<option ${s.name===st?'selected':''}>${s.name}</option>`).join('');
-  const lineOpts=tlLines().map(l=>`<option ${l===tlLine()?'selected':''}>${l}</option>`).join('');
   const jobTxt=t=>t.targetJob&&t.targetJob.clientName?t.targetJob.clientName+'／'+t.targetJob.position:'<span style="color:#cbd5e1">未指定</span>';
   const row=(t,mode,extra)=>{const L=tlLast(t);const n=tlCalls(t).length;const fl=tlFlags(t);
     return `<tr><td style="text-align:left"><a href="javascript:tlOpenProfile('${t.id}')" style="font-weight:600;color:#1e40af">${tlEsc(t.name||'?')}</a>${tlRatingBadge(t.rating)}${tlTagBadges(t)} <span style="color:#94a3b8;font-size:11px">${t.age||''}${t.sex?'・'+t.sex:''}</span>${fl.length?`<br><span style="font-size:11px;color:#dc2626">⚠ ${fl.join('、')}</span>`:''}</td>
@@ -1863,8 +1862,6 @@ function renderTalent(){
   box.innerHTML=`
   <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
     <label style="font-size:13px">撥打人員 <select onchange="switchPhoneStaff(this.value);renderTalent()" style="${st?'':'border:2px solid #dc2626'}"><option value="" ${st?'':'selected'}>請選擇</option>${staffOpts}</select></label>
-    <label style="font-size:13px">今日門號 <select onchange="tlSetLine(this.value)"><option value="">請選擇</option>${lineOpts}</select></label>
-    <button class="btn btn-outline btn-sm" onclick="tlAddLine()">＋ 門號</button>
     <button class="btn btn-success btn-sm" onclick="tlOpenImport()">📥 匯入履歷（104／打工趣）</button>
     <button class="btn btn-outline btn-sm" onclick="tlOpenConfig()">⚙ 初篩題設定</button>
     <button class="btn btn-outline btn-sm" onclick="tlExportCSV()">⇩ 匯出待撥名單</button>
@@ -1908,7 +1905,6 @@ function tlDiagHtml(){
     <div class="table-wrap"><table><thead><tr><th>分組</th><th>撥出</th><th>接通</th><th>接通率</th><th>有效接通率<br><span style="font-weight:400;font-size:10px">不含非本人／已找到</span></th><th>秒掛率</th><th>空號率</th></tr></thead><tbody>
     ${cut('撥打時段',x=>slot(x.hour),['09–12','12–14','14–18','18 以後'])}
     ${cut('投遞到首撥天數（只算首撥）',x=>x.gap==null?null:x.gap===0?'當天':x.gap===1?'1 天':'2 天以上',['當天','1 天','2 天以上'])}
-    ${cut('撥打門號',x=>x.c.line||'未填')}
     ${cut('名單來源',x=>x.kind,['首撥','重撥','人才庫／約定回撥'])}
     ${cut('撥打者',x=>x.c.by||'—')}
     </tbody></table></div>
@@ -2049,7 +2045,6 @@ async function tlSaveConfig(){
 function tlStartCall(id,recJob){
   const t=talents.find(x=>x.id===id); if(!t) return;
   if(!tlStaffOK())return;
-  if(!tlLine()){if(!confirm('尚未選擇今日門號（每天要重新選一次），仍要開始？'))return;}
   tlCall={id,start:Date.now()};
   const L=tlLast(t), fl=tlFlags(t);
   document.getElementById('tlCallInfo').innerHTML=`
@@ -2337,10 +2332,10 @@ const CT_FIELDS = [
   ['勾選框（□／■）', ['chk:性別=男','chk:性別=女','chk:帳戶類型=郵局','chk:帳戶類型=其它','chk:健保=依附父母','chk:健保=其他單位','chk:離職原因=（原因文字）']]
 ];
 const CT_CHK_FIELDS = ['性別','帳戶類型','健保','離職原因'];
-let ctPkgs = {}, ctAdmins = ['jeff'], ctPkgUnsub = null, ctPkgEdit = null;
+let ctPkgs = {}, ctAdmins = ['jeff','joy','ccc'], ctPkgUnsub = null, ctPkgEdit = null;
 function ctPkgInit(){
   if(ctPkgUnsub) return;
-  ctPkgUnsub = db.collection(PKG_COL).onSnapshot(s=>{ctPkgs={};s.forEach(d=>{if(d.id==='_settings'){ctAdmins=(d.data().admins||['jeff']);}else ctPkgs[d.id]={id:d.id,...d.data()};});
+  ctPkgUnsub = db.collection(PKG_COL).onSnapshot(s=>{ctPkgs={};s.forEach(d=>{if(d.id==='_settings'){ctAdmins=(d.data().admins||ctAdmins);}else ctPkgs[d.id]={id:d.id,...d.data()};});
     if(document.getElementById('ctPkgModal').classList.contains('open'))ctPkgRenderList();}, e=>{console.error(e);ctPkgUnsub=null;});
 }
 function ctMe(){const u=auth.currentUser;return u?(u.email||'').split('@')[0]:'';}
@@ -2444,7 +2439,7 @@ async function ctPkgSave(){
     const nosig=p.docs.filter(d=>!(d.tags||[]).includes('簽名')).map(d=>d.name);if(nosig.length&&!confirm('以下文件沒有 {{簽名}}，不會出現員工簽名：\n'+nosig.join('\n')+'\n\n仍要啟用嗎？'))return;}
   const {_new,id,...save}=p;save.updatedAt=tlNow();save.updatedBy=ctMe();
   showLoading(true);
-  try{await db.collection(PKG_COL).doc(id).set(save);delete p._new;ctPkgRenderEditor();alert('已儲存');}
+  try{await db.collection(PKG_COL).doc(id).set(save);delete p._new;ctPkgEdit=null;closeModal('ctPkgModal');}
   catch(e){alert('儲存失敗：'+(e.code||e.message));}finally{showLoading(false);}
 }
 async function ctPkgDelete(){
