@@ -232,11 +232,25 @@ function docText(d){
 function togR(x,on){const a=S.opt.離職原因.filter(y=>y!==x);if(on)a.push(x);S.opt.離職原因=a;}
 
 /* 4 閱讀文件並逐份同意 */
+async function fetchPreview(){
+  const key=JSON.stringify([S.data,S.opt]);
+  if(S.pv&&S.pvKey===key)return;
+  S.pvLoading=true;S.pvErr='';render();
+  try{
+    const r=await fetch(SERVICE+'/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({test:CT_COL==='test_contracts',token:LIVE.ref.id,last3:S.last3,data:S.data,opts:S.opt})});
+    const j=await r.json().catch(()=>({ok:false}));
+    if(!j.ok)throw new Error(j.error||'預覽產生失敗');
+    S.pv=j.docs;S.pvKey=key;
+  }catch(e){console.error(e);S.pv=null;S.pvErr='無法產生文件預覽，以下顯示文字版內容。';}
+  S.pvLoading=false;render();
+}
 function vDocs(){
   const ds=docs();
-  return `<div class="card"><h2>閱讀文件（${ds.length} 份）</h2><p class="hint">請點開每份文件閱讀，並勾選同意。</p>
+  if(LIVE&&!S.pvLoading&&!(S.pv&&S.pvKey===JSON.stringify([S.data,S.opt]))&&!S.pvErr)fetchPreview();
+  if(S.pvLoading)return `<div class="card done"><div style="font-size:40px">⏳</div><h2>正在產生文件預覽</h2><p class="hint">依您填寫的資料套入契約，約需 10–30 秒，請稍候。</p></div>`;
+  return `<div class="card"><h2>閱讀文件（${ds.length} 份）</h2><p class="hint">請點開每份文件閱讀，並勾選同意。${S.pv?'預覽為未簽名版本，簽名後會產生正式 PDF。':''}${S.pvErr?'<br><span style="color:#b45309">'+S.pvErr+'</span>':''}</p>
     ${ds.map((d,i)=>`<details class="doc" ${i===0?'open':''}><summary>${i+1}. ${esc(d.name)}${S.agreed[d.name]?'<span class="ok-doc">✓ 已同意</span>':''}</summary><div class="in pv">
-      ${(PREVIEW[d.name]||[]).length?PREVIEW[d.name].map(src=>`<img loading="lazy" src="${src}">`).join(''):docText(d)}
+      ${(()=>{const pv=S.pv&&S.pv.find(x=>x.name===d.name);const imgs=pv&&pv.pages&&pv.pages.length?pv.pages:(PREVIEW[d.name]||[]);return imgs.length?imgs.map(src=>`<img loading="lazy" src="${src}">`).join(''):docText(d);})()}
       <label class="chk"><input type="checkbox" ${S.agreed[d.name]?'checked':''} onchange="S.agreed[docs()[${i}].name]=this.checked;updDocs()"><span>我已閱讀並同意簽署《${esc(d.name)}》</span></label></div></details>`).join('')}
     <button class="btn" id="docNext" onclick="go(4)">下一步：簽名</button><button class="btn ghost" onclick="go(2)">返回</button></div>`;
 }

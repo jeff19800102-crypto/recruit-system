@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify, Response
 import firebase_admin
 from firebase_admin import firestore, storage, auth as fauth
 from PIL import Image
-from filler import build_pdf
+from filler import build_pdf, build_previews
 
 BUCKET = os.environ.get('BUCKET', 'recruit-system-904ba.firebasestorage.app')
 firebase_admin.initialize_app(options={'storageBucket': BUCKET})
@@ -106,11 +106,8 @@ def sign():
     if msg: return err(msg, 400)
     sig = parse_sig(b.get('signaturePng'))
     if not sig: return err('簽名圖無效，請重新簽名', 400)
-    opts_in = b.get('opts') or {}
-    opts = {'健保': clean(opts_in.get('健保'), 10), '勞退': clean(opts_in.get('勞退'), 2),
-            '離職原因': [clean(x, 40) for x in (opts_in.get('離職原因') or []) if isinstance(x, str)][:20]}
-    if opts['健保'] and opts['健保'] not in ('公司投保', '依附父母', '其他單位'): return err('健保選項不正確', 400)
-    if opts['勞退'] and opts['勞退'] not in [str(i) for i in range(7)]: return err('勞退自提選項不正確', 400)
+    opts, msg = parse_opts(b.get('opts') or {})
+    if msg: return err(msg, 400)
     snapdocs = (c.get('pkgSnap') or {}).get('docs') or []
     if not snapdocs: return err('這份簽約沒有設定文件範本', 400)
 
@@ -131,19 +128,8 @@ def sign():
     if st != 'ok': return err('這份簽約已作廢', 409)
 
     try:
-        docs = [x for x in snapdocs if not x.get('optional') or str(opts.get(x['optional']['field'])) in x['optional']['in']]
-        templates = []
-        for x in docs:
-            f = db.collection(fcol).document(x['fileId']).get()
-            if not f.exists: raise RuntimeError(f"範本檔案遺失：{x['name']}")
-            templates.append((x['name'], base64.b64decode(f.to_dict()['b64'])))
-        today = now_tw()[:10]
-        job = {k: clean(v, 120) for k, v in (c.get('job') or {}).items() if isinstance(v, (str, int, float))}
-        values = {**job,
-                  '員工姓名': d['name'], '手機': d['phone'], '市話': d['tel'], '身分證字號': d['idNo'], '性別': d['sex'], '生日': d['birthday'],
-                  '通訊地址': d['address'], 'Email': d['email'], '銀行': d['bank'], '分行': d['branch'], '帳號': d['account'],
-                  '帳戶說明': f"{d['bank']} {d['branch']} 帳號 {d['account']}", '帳戶類型': '郵局' if d['bankCode'] == '700' else '其它',
-                  '健保': opts['健保'], '勞退自提': opts['勞退'] or '0', '離職原因': opts['離職原因'], '簽署日': today}
+        docs, templates = load_templates(c, fcol, opts)
+        values = build_values(c, d, opts, now_tw()[:10])
         pdf, sha = build_pdf(templates, values, sig)
         path = f"{mode}/contracts/{token}.pdf"
         bucket.blob(path).upload_from_string(pdf, content_type='application/pdf')
@@ -182,6 +168,62 @@ def pdf():
     data = bucket.blob(c['pdfPath']).download_as_bytes()
     fn = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', 'contract')) or 'contract'
     return Response(data, mimetype='application/pdf', headers={'Content-Disposition': f'attachment; filename={fn}.pdf'})
+
+BLANK_SIG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+
+def build_values(c, d, opts, today):
+    job = {k: clean(v, 120) for k, v in (c.get('job') or {}).items() if isinstance(v, (str, int, float))}
+    return {**job,
+            '員工姓名': d['name'], '手機': d['phone'], '市話': d['tel'], '身分證字號': d['idNo'], '性別': d['sex'], '生日': d['birthday'],
+            '通訊地址': d['address'], 'Email': d['email'], '銀行': d['bank'], '分行': d['branch'], '帳號': d['account'],
+            '帳戶說明': f"{d['bank']} {d['branch']} 帳號 {d['account']}", '帳戶類型': '郵局' if d['bankCode'] == '700' else '其它',
+            '健保': opts['健保'], '勞退自提': opts['勞退'] or '0', '離職原因': opts['離職原因'], '簽署日': today}
+
+def parse_opts(opts_in):
+    opts = {'健保': clean(opts_in.get('健保'), 10), '勞退': clean(opts_in.get('勞退'), 2),
+            '離職原因': [clean(x, 40) for x in (opts_in.get('離職原因') or []) if isinstance(x, str)][:20]}
+    if opts['健保'] and opts['健保'] not in ('公司投保', '依附父母', '其他單位'): return None, '健保選項不正確'
+    if opts['勞退'] and opts['勞退'] not in [str(i) for i in range(7)]: return None, '勞退自提選項不正確'
+    return opts, None
+
+def load_templates(c, fcol, opts):
+    snapdocs = (c.get('pkgSnap') or {}).get('docs') or []
+    docs = [x for x in snapdocs if not x.get('optional') or str(opts.get(x['optional']['field'])) in x['optional']['in']]
+    templates = []
+    for x in docs:
+        f = db.collection(fcol).document(x['fileId']).get()
+        if not f.exists: raise RuntimeError(f"範本檔案遺失：{x['name']}")
+        templates.append((x['name'], base64.b64decode(f.to_dict()['b64'])))
+    return docs, templates
+
+@app.route('/preview', methods=['POST', 'OPTIONS'])
+def preview():
+    """簽署前預覽：用員工填的資料產生未簽名的頁面圖片"""
+    if request.method == 'OPTIONS': return ('', 204)
+    b = request.get_json(force=True, silent=True) or {}
+    mode = 'test' if b.get('test') else 'prod'
+    ccol, fcol, _ = COLS[mode]
+    token = str(b.get('token', ''))
+    if not valid_token(token): return err('連結無效', 400)
+    snap = db.collection(ccol).document(token).get()
+    if not snap.exists: return err('找不到簽約資料', 404)
+    c = snap.to_dict()
+    phone = ((c.get('worker') or {}).get('phone') or '')
+    if str(b.get('last3', '')) != phone[-3:] or len(phone) < 10: return err('身分驗證失敗', 403)
+    if c.get('status') not in ('sent', 'opened'): return err('這份簽約已完成或已作廢', 409)
+    d, msg = parse_data(b.get('data') or {})
+    if msg: return err(msg, 400)
+    opts, msg = parse_opts(b.get('opts') or {})
+    if msg: return err(msg, 400)
+    try:
+        docs, templates = load_templates(c, fcol, opts)
+        if not templates: return err('這份簽約沒有設定文件範本', 400)
+        values = build_values(c, d, opts, now_tw()[:10])
+        pv = build_previews(templates, values, BLANK_SIG)
+        return jsonify({'ok': True, 'docs': [{'name': n, 'pages': ['data:image/jpeg;base64,' + base64.b64encode(p).decode() for p in pages]} for n, pages in pv]})
+    except Exception as e:
+        log.exception('preview failed %s', token)
+        return err('預覽產生失敗', 500)
 
 @app.route('/texts', methods=['GET', 'OPTIONS'])
 def texts():

@@ -49,22 +49,42 @@ def fill_docx(template_bytes, values, sig_png):
         if '{{簽名}}' in p.text: put_signature(p, sig_png)
     out = io.BytesIO(); d.save(out); return out.getvalue()
 
+def _convert(tmp, i, name, data, v, sig_png):
+    src = os.path.join(tmp, f'{i:02d}.docx')
+    open(src, 'wb').write(fill_docx(data, v, sig_png))
+    r = subprocess.run(['soffice', '--headless', '--norestore', f'-env:UserInstallation=file://{tmp}/lo', '--convert-to', 'pdf', '--outdir', tmp, src],
+                       capture_output=True, text=True, timeout=120)
+    out = os.path.join(tmp, f'{i:02d}.pdf')
+    if r.returncode != 0 or not os.path.exists(out):
+        raise RuntimeError(f'轉檔失敗 {name}: {r.stderr[-300:]}')
+    return out
+
 def build_pdf(templates, values, sig_png):
     """templates: [(檔名, docx bytes)]；回傳 (合併後 PDF bytes, sha256)"""
     v = expand_dates(values)
     tmp = tempfile.mkdtemp()
     try:
-        pdfs = []
-        for i, (name, data) in enumerate(templates):
-            src = os.path.join(tmp, f'{i:02d}.docx')
-            open(src, 'wb').write(fill_docx(data, v, sig_png))
-            subprocess.run(['soffice', '--headless', '--norestore', f'-env:UserInstallation=file://{tmp}/lo', '--convert-to', 'pdf', '--outdir', tmp, src],
-                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-            pdfs.append(os.path.join(tmp, f'{i:02d}.pdf'))
+        pdfs = [_convert(tmp, i, n, d, v, sig_png) for i, (n, d) in enumerate(templates)]
         merged = os.path.join(tmp, 'merged.pdf')
         if len(pdfs) == 1: shutil.copy(pdfs[0], merged)
         else: subprocess.run(['pdfunite', *pdfs, merged], check=True)
         b = open(merged, 'rb').read()
         return b, hashlib.sha256(b).hexdigest()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def build_previews(templates, values, sig_png, dpi=72, quality=55):
+    """每份文件各自轉成頁面 JPEG；回傳 [(name, [jpeg bytes...])]"""
+    v = expand_dates(values)
+    tmp = tempfile.mkdtemp()
+    try:
+        out = []
+        for i, (n, d) in enumerate(templates):
+            pdf = _convert(tmp, i, n, d, v, sig_png)
+            prefix = os.path.join(tmp, f'p{i:02d}')
+            subprocess.run(['pdftoppm', '-r', str(dpi), '-jpeg', '-jpegopt', f'quality={quality}', pdf, prefix], check=True, timeout=120)
+            pages = sorted(f for f in os.listdir(tmp) if f.startswith(f'p{i:02d}') and f.endswith('.jpg'))
+            out.append((n, [open(os.path.join(tmp, f), 'rb').read() for f in pages]))
+        return out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

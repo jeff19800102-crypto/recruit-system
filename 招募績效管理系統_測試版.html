@@ -2194,7 +2194,7 @@ const ctEsc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(
 function ctPkgAll(){
   const out={};
   Object.values(typeof ctPkgs!=='undefined'?ctPkgs:{}).filter(p=>p.active).forEach(p=>{const co=CT_COMPANIES[p.company]||{};
-    out[p.id]={name:p.name,company:co.name,short:co.short,prefix:co.prefix,client:p.client,clientShort:p.keyword||p.name,defaults:p.defaults||{},docs:p.docs||[]};});
+    out[p.id]={name:p.name,company:co.name,short:co.short,prefix:co.prefix,client:p.client,clientShort:p.keyword||p.client||p.name,defaults:p.defaults||{},docs:p.docs||[]};});
   return Object.keys(out).length?out:CT_PKGS;
 }
 function ctInit(){
@@ -2210,7 +2210,8 @@ function ctLink(c){return location.href.replace(/[?#].*$/,'').replace(/[^/]*$/,'
 function ctMd(d){const [,m,dd]=(d||'').slice(0,10).split('-');return d?`${+m}/${+dd}`:'';}
 function ctMessage(c){
   const p=CT_PKGS[c.pkg]||{};
-  return `${c.worker.name}您好，恭喜錄取${c.clientShort||p.clientShort||c.job.要派公司}${c.job.職稱}（${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}）。\n請在 ${ctMd(c.expiresAt)} ${c.expiresAt.slice(11,16)} 前點下方連結完成線上簽約（約 5 分鐘）：\n${ctLink(c)}\n如有問題請來電 04-2452-6670。`;
+  const cs=c.clientShort||p.clientShort||c.job.要派公司||'';const jt=c.job.職稱||'';
+  return `${c.worker.name}您好，恭喜錄取${cs}${cs.endsWith(jt)?'':' '+jt}（${ctMd(c.job.到職日)}–${ctMd(c.job.最後工作日)}）。\n請在 ${ctMd(c.expiresAt)} ${c.expiresAt.slice(11,16)} 前點下方連結完成線上簽約（約 5 分鐘）：\n${ctLink(c)}\n如有問題請來電 04-2452-6670。`;
 }
 // ── 招募客服：每列的簽約按鈕與狀態 ──
 function ctSvcKey(r){return r.svcId?('id:'+r.svcId):[r.candidateName||'',r.clientName||'',r.position||'',r.date||''].join('|');}
