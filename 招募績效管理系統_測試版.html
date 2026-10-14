@@ -2139,6 +2139,8 @@ async function tlImportAI(file){
 // ===== 線上簽約（測試階段：只存簽約狀態，不存身分證、帳號等個資）=====
 const CT_COL = IS_TEST ? 'test_contracts' : 'contracts';
 const CT_SIGN_PAGE = 'contract-sign.html';
+const CT_SERVICE = 'https://pdf-service-744257186789.asia-east1.run.app';
+function ctPdfUrl(c){return `${CT_SERVICE}/pdf?${IS_TEST?'test=1&':''}t=${c.id}`;}
 const CT_PKGS = {
   gaishiwei: {name:'蓋世威（信亞・PT 工讀生）', company:'信亞人力派遣股份有限公司', short:'信亞', prefix:'XY',
     client:'英屬百慕達商蓋世威國際有限公司台灣分公司', clientShort:'蓋世威', defaults:{職稱:'工讀生', 時薪:'230', 發薪日:'10'}}
@@ -2179,7 +2181,7 @@ function ctSvcStatus(k){
   const list=contracts.filter(c=>c.svcKey===k&&c.status!=='void').sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''));
   if(!list.length)return '';
   const c=list[0];
-  return `${ctBadge(c)}${['sent','opened','expired'].includes(ctState(c))?` <a href="javascript:ctCopy('${c.id}')" style="font-size:11px">複製</a> <a href="javascript:ctResend('${c.id}')" style="font-size:11px">延長</a> <a href="javascript:ctVoid('${c.id}')" style="font-size:11px;color:#dc2626">作廢</a>`:''}${c.status==='signed'&&c.opts?`<div style="font-size:10px;color:#475569;white-space:nowrap">健保 ${c.opts.健保}・勞退 ${c.opts.勞退}%</div>`:''}`;
+  return `${ctBadge(c)}${['sent','opened','expired'].includes(ctState(c))?` <a href="javascript:ctCopy('${c.id}')" style="font-size:11px">複製</a> <a href="javascript:ctResend('${c.id}')" style="font-size:11px">延長</a> <a href="javascript:ctVoid('${c.id}')" style="font-size:11px;color:#dc2626">作廢</a>`:''}${c.status==='signed'&&c.pdfPath?` <a href="${ctPdfUrl(c)}" target="_blank" style="font-size:11px">📄 PDF</a>`:''}${c.status==='signed'&&c.opts?`<div style="font-size:10px;color:#475569;white-space:nowrap">健保 ${c.opts.健保||'—'}・勞退 ${c.opts.勞退||0}%</div>`:''}`;
 }
 function ctRefreshSvc(){document.querySelectorAll('[data-ctkey]').forEach(el=>{el.innerHTML=ctSvcStatus(decodeURIComponent(el.dataset.ctkey));});}
 function ctOpenFromService(i){
@@ -2234,7 +2236,7 @@ async function ctCreate(){
     if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort||''} ${c.job.職稱}）`}]}).catch(()=>{});
     const msg=ctMessage(c);
     document.getElementById('ctResult').innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px">
-      <b>已產生簽約連結</b>（${c.contractNo}，48 小時內有效）<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${msg}</textarea>
+      <b>已產生簽約連結</b>（${c.contractNo}，48 小時內有效）${c.pkgSnap?'':'<br><span style="color:#b91c1c">注意：這個簽約包沒有上傳 Word 範本，員工簽完不會產生 PDF。請先到「📁 簽約範本」建立並啟用簽約包。</span>'}<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${msg}</textarea>
       <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('ctMsg').value).then(()=>this.textContent='✓ 已複製，請貼到 LINE')">📋 複製 LINE 訊息</button></div>`;
     document.getElementById('ctSendBtn').style.display='none';
   }catch(e){alert('建立失敗：'+(e.code||e.message)+'\n若為權限不足，需在 Firebase 主控台的 Firestore 規則加入「'+CT_COL+'」集合。');}
