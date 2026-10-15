@@ -51,6 +51,14 @@ def clean(v, n):
     """字串：去控制字元、限長"""
     return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', str(v or ''))[:n].strip()
 
+def pdf_name(c, suffix=''):
+    """下載檔名：員工姓名_簽約編號[_後綴].pdf（同時給 ASCII 備用名與 UTF-8 正式名）"""
+    from urllib.parse import quote
+    name = re.sub(r'[\\/:*?"<>|\s]', '', (c.get('worker') or {}).get('name') or '')
+    no = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', '')) or 'contract'
+    full = '_'.join(x for x in (name, no, suffix) if x) + '.pdf'
+    return f"filename={no}{('_review' if suffix else '')}.pdf; filename*=UTF-8''{quote(full)}"
+
 def valid_token(t):
     return bool(re.match(r'^[A-Za-z0-9]{12,40}$', t or ''))
 
@@ -170,8 +178,8 @@ def pdf():
         ok = bool(k) and k == phone[-3:] and fresh
     if not ok: return err('無權限下載，請登入後台或聯絡招募人員', 403)
     data = bucket.blob(c['pdfPath']).download_as_bytes()
-    fn = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', 'contract')) or 'contract'
-    return Response(data, mimetype='application/pdf', headers={'Content-Disposition': f'attachment; filename={fn}.pdf'})
+
+    return Response(data, mimetype='application/pdf', headers={'Content-Disposition': 'attachment; ' + pdf_name(c)})
 
 BLANK_SIG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
 
@@ -300,8 +308,8 @@ def review():
     if not rv.get('ready'): return err('文件尚未準備好', 404)
     if request.args.get('pdf'):
         data = bucket.blob(f'{mode}/review/{token}.pdf').download_as_bytes()
-        fn = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', 'review')) or 'review'
-        return Response(data, mimetype='application/pdf', headers={'Content-Disposition': f'inline; filename={fn}-review.pdf', 'Cache-Control': 'private, max-age=600'})
+
+        return Response(data, mimetype='application/pdf', headers={'Content-Disposition': 'inline; ' + pdf_name(c, '審閱版'), 'Cache-Control': 'private, max-age=600'})
     out = []
     for i, d in enumerate(rv.get('docs') or []):
         pages = []
