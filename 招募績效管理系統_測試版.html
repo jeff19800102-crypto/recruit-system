@@ -2376,7 +2376,7 @@ function ctPkgOpen(){
 function ctPkgRenderList(){
   const list=Object.values(ctPkgs).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   document.getElementById('ctPkgList').innerHTML=list.map(p=>`<div onclick="ctPkgSelect('${p.id}')" style="padding:8px 10px;border-radius:8px;cursor:pointer;margin-bottom:4px;${ctPkgEdit&&ctPkgEdit.id===p.id?'background:#dbeafe;':'background:#f8fafc;'}">
-     <div style="font-weight:600;font-size:13px">${esc(p.name||'(未命名)')}</div>
+     <div style="font-weight:600;font-size:13px">${ctEsc(p.name||'(未命名)')}</div>
      <div style="font-size:11px;color:#64748b">${(CT_COMPANIES[p.company]||{}).short||''}・${(p.docs||[]).length} 份文件・${p.active?'<span style="color:#15803d">啟用</span>':'<span style="color:#94a3b8">停用</span>'}</div></div>`).join('')||'<div style="font-size:13px;color:#94a3b8">尚無簽約包</div>';
 }
 function ctPkgNew(){ctPkgEdit={id:'p'+Date.now().toString(36),name:'',company:'xinya',client:'',keyword:'',defaults:{職稱:'',時薪:'',發薪日:'10'},docs:[],active:false,_new:true};ctPkgRenderEditor();ctPkgRenderList();}
