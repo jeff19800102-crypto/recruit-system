@@ -7,7 +7,9 @@ from flask import Flask, request, jsonify, Response
 import firebase_admin
 from firebase_admin import firestore, storage, auth as fauth
 from PIL import Image
-from filler import build_pdf, build_previews
+import threading, time
+from filler import build_pdf, build_previews, warm_up
+threading.Thread(target=warm_up, daemon=True).start()
 
 BUCKET = os.environ.get('BUCKET', 'recruit-system-904ba.firebasestorage.app')
 firebase_admin.initialize_app(options={'storageBucket': BUCKET})
@@ -219,7 +221,9 @@ def preview():
         docs, templates = load_templates(c, fcol, opts)
         if not templates: return err('這份簽約沒有設定文件範本', 400)
         values = build_values(c, d, opts, now_tw()[:10])
+        t0 = time.time()
         pv = build_previews(templates, values, BLANK_SIG)
+        log.info('preview %s: %d docs in %.1fs', token, len(pv), time.time() - t0)
         return jsonify({'ok': True, 'docs': [{'name': n, 'pages': ['data:image/jpeg;base64,' + base64.b64encode(p).decode() for p in pages]} for n, pages in pv]})
     except Exception as e:
         log.exception('preview failed %s', token)
