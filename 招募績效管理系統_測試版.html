@@ -403,11 +403,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
       <div class="form-group full"><label>要派企業／簽約包</label><select id="ctPkg" onchange="ctPkgChange()"></select></div>
       <div class="form-group full"><label>職缺（選填，帶入職稱與時薪）</label><select id="ctJob" onchange="ctJobChange()"></select></div>
       <div class="form-group"><label>職稱 *</label><input id="ctTitle"></div>
-      <div class="form-group"><label>時薪（元）*</label><input id="ctWage" type="number"></div>
+      <div class="form-group"><label id="ctWageLab">時薪（元） *</label><input id="ctWage" type="number"></div>
       <div class="form-group"><label>員工編號 *</label><input id="ctNo"></div>
       <div class="form-group"><label>工作部門</label><input id="ctDept"></div>
       <div class="form-group"><label>到職日 *</label><input id="ctStart" type="date"></div>
-      <div class="form-group"><label>最後工作日 *</label><input id="ctEnd" type="date"></div>
+      <div class="form-group"><label id="ctEndLab">最後工作日 *</label><input id="ctEnd" type="date"></div>
       <div class="form-group"><label>發薪日（每月幾號）</label><input id="ctPayDay" type="number"></div>
     </div>
     <div id="ctResult"></div>
@@ -2287,7 +2287,11 @@ function ctOpenFromRec(r){
   }
   g('ctModal').classList.add('open');
 }
-function ctPkgChange(){const p=ctPkgAll()[document.getElementById('ctPkg').value];if(!p)return;document.getElementById('ctTitle').value=p.defaults.職稱||'';document.getElementById('ctWage').value=p.defaults.時薪||'';document.getElementById('ctPayDay').value=p.defaults.發薪日||'';}
+function ctPkgTags(p){return (p&&p.docs||[]).flatMap(d=>d.tags||[]);}
+function ctPkgChange(){const p=ctPkgAll()[document.getElementById('ctPkg').value];if(!p)return;document.getElementById('ctTitle').value=p.defaults.職稱||'';document.getElementById('ctWage').value=p.defaults.時薪||'';document.getElementById('ctPayDay').value=p.defaults.發薪日||'';
+  const tags=ctPkgTags(p);const need=k=>!tags.length||tags.some(t=>t===k||t.startsWith(k+'_'));
+  const mark=(id,txt,on)=>{const lab=document.getElementById(id+'Lab');if(lab)lab.innerHTML=txt+(on?' *':' <span style="color:#94a3b8;font-weight:400">（此簽約包不需要）</span>');};
+  mark('ctWage','時薪（元）',need('時薪'));mark('ctEnd','最後工作日',need('最後工作日'));}
 function ctJobChange(){
   const v=document.getElementById('ctJob').value;if(!v)return;const [cn,pos]=v.split('||');
   const c=(data.clients||[]).find(x=>x.clientName===cn&&x.position===pos);if(!c)return;
@@ -2302,11 +2306,13 @@ async function ctCreate(){
   const wName=g('ctNameIn'),wPhone=g('ctPhoneIn').normalize('NFKC').replace(/\D/g,'');
   const pkgId=g('ctPkg'),p=ctPkgAll()[pkgId];if(!p){alert('請選擇簽約包');return;}
   if(!p.docs||!p.docs.length){alert('這個簽約包還沒有文件範本，員工簽完無法產生 PDF。\n\n請先到「📁 簽約範本」：建立簽約包 → 上傳 4 份 .docx → 勾選「啟用」→ 儲存，再回來發送。');return;}
-  const miss=[['ctNo','員工編號'],['ctTitle','職稱'],['ctWage','時薪'],['ctStart','到職日'],['ctEnd','最後工作日']].filter(([id])=>!g(id)).map(x=>x[1]);
+  // 必填依簽約包的文件用到的欄位決定：範本沒有 {{時薪}}／{{最後工作日}} 就不強制（例如恆隆行短期 PT 薪資寫範圍、長期 PT 無結束日）
+  const tags=ctPkgTags(p);const need=k=>tags.some(t=>t===k||t.startsWith(k+'_'));
+  const miss=[['ctNo','員工編號'],['ctTitle','職稱'],['ctWage','時薪',need('時薪')],['ctStart','到職日'],['ctEnd','最後工作日',need('最後工作日')]].filter(([id,,req])=>req!==false&&!g(id)).map(x=>x[1]);
   if(!wName)miss.push('姓名');if(!/^09\d{8}$/.test(wPhone))miss.push('正確的手機（09 開頭 10 碼）');
   if(miss.length){alert('請先填寫：'+miss.join('、'));return;}
-  if(g('ctEnd')<g('ctStart')){alert('最後工作日不能早於到職日。');return;}
-  if(+g('ctWage')<196&&!confirm('時薪低於基本工資時薪 196 元，確定嗎？'))return;
+  if(g('ctEnd')&&g('ctEnd')<g('ctStart')){alert('最後工作日不能早於到職日。');return;}
+  if(g('ctWage')&&+g('ctWage')<196&&!confirm('時薪低於基本工資時薪 196 元，確定嗎？'))return;
   const today=tlToday().replace(/-/g,'');
   const cref=db.collection(CT_COL).doc(`_counter_${p.prefix}${today}`);
   const seq=await db.runTransaction(async tx=>{const d=await tx.get(cref);const n=(d.exists?d.data().n:0)+1;tx.set(cref,{n});return n;}).catch(()=>contracts.filter(c=>(c.contractNo||'').startsWith(`${p.prefix}-${today}`)).length+1);
