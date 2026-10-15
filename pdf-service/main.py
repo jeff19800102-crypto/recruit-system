@@ -1,4 +1,6 @@
 """線上簽約伺服器（Cloud Run，台灣 asia-east1）
+POST /prepare：招募客服發送時先產出審閱版（頁面圖＋PDF），員工開啟連結直接讀取，不必等待轉檔
+GET  /review ：讀取審閱版（同仁 Bearer；員工 t + 末 3 碼）
 POST /sign ：員工送出簽署 → 驗證 → 鎖定狀態 → 保存個資（僅伺服器可讀）→ 產生 PDF 存到 Cloud Storage → 更新簽約狀態
 GET  /pdf  ：下載已簽署 PDF（同仁：Bearer 登入權杖；員工：token + 手機末 3 碼，簽署後 7 天內）
 """
@@ -198,37 +200,6 @@ def load_templates(c, fcol, opts):
         templates.append((x['name'], base64.b64decode(f.to_dict()['b64'])))
     return docs, templates
 
-@app.route('/preview', methods=['POST', 'OPTIONS'])
-def preview():
-    """簽署前預覽：用員工填的資料產生未簽名的頁面圖片"""
-    if request.method == 'OPTIONS': return ('', 204)
-    b = request.get_json(force=True, silent=True) or {}
-    mode = 'test' if b.get('test') else 'prod'
-    ccol, fcol, _ = COLS[mode]
-    token = str(b.get('token', ''))
-    if not valid_token(token): return err('連結無效', 400)
-    snap = db.collection(ccol).document(token).get()
-    if not snap.exists: return err('找不到簽約資料', 404)
-    c = snap.to_dict()
-    phone = ((c.get('worker') or {}).get('phone') or '')
-    if str(b.get('last3', '')) != phone[-3:] or len(phone) < 10: return err('身分驗證失敗', 403)
-    if c.get('status') not in ('sent', 'opened'): return err('這份簽約已完成或已作廢', 409)
-    d, msg = parse_data(b.get('data') or {})
-    if msg: return err(msg, 400)
-    opts, msg = parse_opts(b.get('opts') or {})
-    if msg: return err(msg, 400)
-    try:
-        docs, templates = load_templates(c, fcol, opts)
-        if not templates: return err('這份簽約沒有設定文件範本', 400)
-        values = build_values(c, d, opts, now_tw()[:10])
-        t0 = time.time()
-        pv = build_previews(templates, values, BLANK_SIG)
-        log.info('preview %s: %d docs in %.1fs', token, len(pv), time.time() - t0)
-        return jsonify({'ok': True, 'docs': [{'name': n, 'pages': ['data:image/jpeg;base64,' + base64.b64encode(p).decode() for p in pages]} for n, pages in pv]})
-    except Exception as e:
-        log.exception('preview failed %s', token)
-        return err('預覽產生失敗', 500)
-
 @app.route('/texts', methods=['GET', 'OPTIONS'])
 def texts():
     """簽署頁顯示用：依連結代碼回傳各文件的段落文字（直接從 Word 檔抽取）"""
@@ -256,6 +227,90 @@ def texts():
         out.append({'name': x.get('name', ''), 'text': paras})
     resp = jsonify({'ok': True, 'docs': out})
     resp.headers['Cache-Control'] = 'private, max-age=300'
+    return resp
+
+
+def staff_ok():
+    """同仁登入權杖（Bearer Firebase ID token）"""
+    authz = request.headers.get('Authorization', '')
+    if not authz.startswith('Bearer '): return None
+    try: return fauth.verify_id_token(authz[7:])
+    except Exception: return None
+
+BLANK_D = {k: '' for k in ('name', 'phone', 'sex', 'birthday', 'idNo', 'tel', 'address', 'email', 'bank', 'branch', 'account', 'bankCode')}
+
+@app.route('/prepare', methods=['POST', 'OPTIONS'])
+def prepare():
+    """發送時由招募客服觸發：用範本先產出「審閱版」（員工欄位留白、未簽名），存成頁面圖與 PDF，員工開啟連結時直接讀取"""
+    if request.method == 'OPTIONS': return ('', 204)
+    if not staff_ok(): return err('請重新登入', 401)
+    b = request.get_json(force=True, silent=True) or {}
+    mode = 'test' if b.get('test') else 'prod'
+    ccol, fcol, _ = COLS[mode]
+    token = str(b.get('token', ''))
+    if not valid_token(token): return err('連結無效', 400)
+    ref = db.collection(ccol).document(token)
+    snap = ref.get()
+    if not snap.exists: return err('找不到簽約資料', 404)
+    c = snap.to_dict()
+    if c.get('status') not in ('sent', 'opened'): return err('這份簽約已完成或已作廢', 409)
+    snapdocs = (c.get('pkgSnap') or {}).get('docs') or []
+    if not snapdocs: return err('這份簽約沒有設定文件範本', 400)
+    t0 = time.time()
+    try:
+        templates = []
+        for x in snapdocs:
+            f = db.collection(fcol).document(x['fileId']).get()
+            if not f.exists: raise RuntimeError(f"範本檔案遺失：{x['name']}")
+            templates.append((x['name'], base64.b64decode(f.to_dict()['b64'])))
+        values = build_values(c, BLANK_D, {'健保': '', '勞退': '', '離職原因': []}, '')
+        values['勞退自提'] = ''; values['帳戶說明'] = ''; values['帳戶類型'] = ''
+        w = c.get('worker') or {}; values['員工姓名'] = clean(w.get('name'), 30); values['手機'] = clean(w.get('phone'), 20)   # 姓名、手機由客服設定，先帶入
+        pv, pdf = build_previews(templates, values, BLANK_SIG, dpi=80, quality=60, with_pdf=True)
+        docs = []
+        for i, (n, pages) in enumerate(pv):
+            for j, img in enumerate(pages):
+                bucket.blob(f'{mode}/review/{token}/{i:02d}-{j:02d}.jpg').upload_from_string(img, content_type='image/jpeg')
+            docs.append({'name': n, 'pages': len(pages), 'optional': snapdocs[i].get('optional') or None})
+        bucket.blob(f'{mode}/review/{token}.pdf').upload_from_string(pdf, content_type='application/pdf')
+        review = {'ready': True, 'at': now_tw(), 'docs': docs, 'total': sum(d['pages'] for d in docs), 'secs': round(time.time() - t0, 1)}
+        ref.update({'review': review, 'reviewError': firestore.DELETE_FIELD})
+        log.info('prepare %s: %d docs %d pages in %.1fs', token, len(docs), review['total'], review['secs'])
+        return jsonify({'ok': True, 'review': review})
+    except Exception as e:
+        log.exception('prepare failed %s', token)
+        ref.update({'review': {'ready': False}, 'reviewError': clean(str(e), 200), 'reviewErrorAt': now_tw()})
+        return err('文件產生失敗：' + clean(str(e), 120), 500)
+
+@app.route('/review', methods=['GET', 'OPTIONS'])
+def review():
+    """審閱版文件：同仁（Bearer）或員工（t + 手機末 3 碼）。預設回傳各文件頁面圖；pdf=1 回傳合併 PDF"""
+    if request.method == 'OPTIONS': return ('', 204)
+    mode = 'test' if request.args.get('test') else 'prod'
+    ccol = COLS[mode][0]
+    token = request.args.get('t', '')
+    if not valid_token(token): return err('連結無效', 400)
+    snap = db.collection(ccol).document(token).get()
+    if not snap.exists: return err('找不到簽約資料', 404)
+    c = snap.to_dict()
+    phone = (c.get('worker') or {}).get('phone') or ''
+    k = request.args.get('k', '')
+    if not (staff_ok() or (k and len(phone) >= 10 and k == phone[-3:])): return err('無權限', 403)
+    rv = c.get('review') or {}
+    if not rv.get('ready'): return err('文件尚未準備好', 404)
+    if request.args.get('pdf'):
+        data = bucket.blob(f'{mode}/review/{token}.pdf').download_as_bytes()
+        fn = re.sub(r'[^A-Za-z0-9\-]', '', c.get('contractNo', 'review')) or 'review'
+        return Response(data, mimetype='application/pdf', headers={'Content-Disposition': f'inline; filename={fn}-review.pdf', 'Cache-Control': 'private, max-age=600'})
+    out = []
+    for i, d in enumerate(rv.get('docs') or []):
+        pages = []
+        for j in range(int(d.get('pages') or 0)):
+            img = bucket.blob(f'{mode}/review/{token}/{i:02d}-{j:02d}.jpg').download_as_bytes()
+            pages.append('data:image/jpeg;base64,' + base64.b64encode(img).decode())
+        out.append({'name': d.get('name', ''), 'pages': pages})
+    resp = jsonify({'ok': True, 'docs': out})
+    resp.headers['Cache-Control'] = 'private, max-age=600'
     return resp
 
 @app.get('/')

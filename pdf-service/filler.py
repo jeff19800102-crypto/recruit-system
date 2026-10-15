@@ -189,17 +189,22 @@ def build_pdf(templates, values, sig_png):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-def build_previews(templates, values, sig_png, dpi=72, quality=55):
-    """每份文件各自轉成頁面 JPEG；回傳 [(name, [jpeg bytes...])]"""
+def build_previews(templates, values, sig_png, dpi=72, quality=55, with_pdf=False):
+    """每份文件各自轉成頁面 JPEG；回傳 [(name, [jpeg bytes...])]；with_pdf=True 時另回傳合併 PDF bytes"""
     v = expand_dates(values)
     tmp = tempfile.mkdtemp()
     try:
-        out = []
+        out, pdfs = [], []
         for i, (n, pdf) in enumerate(_convert_all(tmp, templates, v, sig_png)):
+            pdfs.append(pdf)
             prefix = os.path.join(tmp, f'p{i:02d}')
             subprocess.run(['pdftoppm', '-r', str(dpi), '-jpeg', '-jpegopt', f'quality={quality}', pdf, prefix], check=True, timeout=120)
             pages = sorted(f for f in os.listdir(tmp) if f.startswith(f'p{i:02d}') and f.endswith('.jpg'))
             out.append((n, [open(os.path.join(tmp, f), 'rb').read() for f in pages]))
-        return out
+        if not with_pdf: return out
+        merged = os.path.join(tmp, 'merged.pdf')
+        if len(pdfs) == 1: shutil.copy(pdfs[0], merged)
+        else: subprocess.run(['pdfunite', *pdfs, merged], check=True)
+        return out, open(merged, 'rb').read()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
