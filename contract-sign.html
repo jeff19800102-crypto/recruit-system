@@ -103,7 +103,7 @@ function vIdentity(){
 function bindIdentity(){[0,1,2].forEach(i=>{const el=$('#c'+i);if(!el)return;el.addEventListener('input',()=>{el.value=el.value.normalize('NFKC').replace(/\D/g,'').slice(0,1);if(el.value&&i<2)$('#c'+(i+1)).focus();});
   el.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!el.value&&i>0)$('#c'+(i-1)).focus();});});const f=$('#c0');if(f)f.focus();}
 function checkCode(){const v=[0,1,2].map(i=>$('#c'+i).value).join('');if(v.length<3){$('#cErr').textContent='請輸入 3 碼數字';return;}
-  if(v===C.worker.phone.slice(-3)){S.last3=v;go(1);return;}S.tries++;render();}
+  if(v===C.worker.phone.slice(-3)){S.last3=v;go(1);fetchReview();return;}S.tries++;render();}
 
 /* ===== 銀行清單（代碼待對照財金公司代碼表確認） ===== */
 const BANKS=[
@@ -231,28 +231,36 @@ function docText(d){
 }
 function togR(x,on){const a=S.opt.離職原因.filter(y=>y!==x);if(on)a.push(x);S.opt.離職原因=a;}
 
-/* 4 閱讀文件並逐份同意 */
-async function fetchPreview(){
-  const key=JSON.stringify([S.data,S.opt]);
-  if(S.pv&&S.pvKey===key)return;
-  S.pvLoading=true;S.pvErr='';render();
+/* 4 閱讀文件並逐份同意：審閱版由招募客服發送時先產好，這裡只是讀取 */
+let RV={state:'idle',docs:null,err:'',tries:0};
+async function fetchReview(){
+  if(!LIVE||RV.state==='loading'||RV.state==='ok')return;
+  RV.state='loading';RV.err='';
   try{
-    const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),90000);
-    const r=await fetch(SERVICE+'/preview',{method:'POST',signal:ac.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({test:CT_COL==='test_contracts',token:LIVE.ref.id,last3:S.last3,data:S.data,opts:S.opt})});
+    const snap=await LIVE.ref.get();const d=snap.data()||{};
+    if(!(d.review&&d.review.ready)){
+      if(d.reviewError)throw new Error('招募人員那端的文件尚未產生成功');
+      RV.tries++;if(RV.tries>20){throw new Error('文件尚未準備好');}
+      RV.state='waiting';if(S.step===3)render();setTimeout(()=>{RV.state='idle';fetchReview();},4000);return;}
+    const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),60000);
+    const r=await fetch(SERVICE+'/review?'+(CT_COL==='test_contracts'?'test=1&':'')+'t='+LIVE.ref.id+'&k='+S.last3,{signal:ac.signal});
     clearTimeout(tm);
     const j=await r.json().catch(()=>({ok:false}));
-    if(!j.ok)throw new Error(j.error||('預覽產生失敗（'+r.status+'）'));
-    S.pv=j.docs;S.pvKey=key;
-  }catch(e){console.error(e);S.pv=null;S.pvErr=(e.name==='AbortError'?'文件預覽逾時':'無法產生文件預覽：'+e.message)+'，以下先顯示文字版內容。';}
-  S.pvLoading=false;render();
+    if(!j.ok)throw new Error(j.error||('讀取失敗（'+r.status+'）'));
+    RV.docs=j.docs;RV.state='ok';
+  }catch(e){console.error(e);RV.state='err';RV.err=e.message;}
+  if(S.step===3)render();
 }
+function reviewPdfUrl(){return SERVICE+'/review?'+(CT_COL==='test_contracts'?'test=1&':'')+'t='+LIVE.ref.id+'&k='+S.last3+'&pdf=1';}
 function vDocs(){
   const ds=docs();
-  if(LIVE&&!S.pvLoading&&!(S.pv&&S.pvKey===JSON.stringify([S.data,S.opt]))&&!S.pvErr)fetchPreview();
-  if(S.pvLoading)return `<div class="card done"><div style="font-size:40px">⏳</div><h2>正在產生文件預覽</h2><p class="hint">依您填寫的資料套入契約，約需 10–30 秒，請稍候。</p></div>`;
-  return `<div class="card"><h2>閱讀文件（${ds.length} 份）</h2><p class="hint">請點開每份文件閱讀，並勾選同意。${S.pv?'預覽為未簽名版本，簽名後會產生正式 PDF。':''}${S.pvErr?'<br><span style="color:#b45309">'+esc(S.pvErr)+'</span> <button class="linkbtn" onclick="S.pvErr=\'\';render()">重試預覽</button>':''}</p>
+  if(LIVE&&RV.state==='idle')fetchReview();
+  if(LIVE&&(RV.state==='loading'||RV.state==='waiting'))return `<div class="card done"><div style="font-size:40px">⏳</div><h2>${RV.state==='waiting'?'文件準備中':'載入文件'}</h2><p class="hint">${RV.state==='waiting'?'招募人員正在產生文件，請稍候幾秒。':'正在載入契約內容…'}</p></div>`;
+  const hasImg=RV.state==='ok'&&RV.docs;
+  return `<div class="card"><h2>閱讀文件（${ds.length} 份）</h2><p class="hint">請點開每份文件閱讀，並勾選同意。${hasImg?'文件為審閱版：您填寫的個人資料與簽名，會在送出簽署後自動填入正式文件。':''}${LIVE&&RV.state==='err'?'<br><span style="color:#b45309">無法載入文件頁面：'+esc(RV.err)+'，以下先顯示文字版內容。</span> <button class="linkbtn" onclick="RV.state=\'idle\';RV.tries=0;render()">重試</button>':''}</p>
+    ${hasImg?`<p style="text-align:right;margin:-4px 0 8px"><a class="linkbtn" href="${reviewPdfUrl()}" target="_blank">📄 另開 PDF 檢視</a></p>`:''}
     ${ds.map((d,i)=>`<details class="doc" ${i===0?'open':''}><summary>${i+1}. ${esc(d.name)}${S.agreed[d.name]?'<span class="ok-doc">✓ 已同意</span>':''}</summary><div class="in pv">
-      ${(()=>{const pv=S.pv&&S.pv.find(x=>x.name===d.name);const imgs=pv&&pv.pages&&pv.pages.length?pv.pages:(PREVIEW[d.name]||[]);return imgs.length?imgs.map(src=>`<img loading="lazy" src="${src}">`).join(''):docText(d);})()}
+      ${(()=>{const pv=hasImg&&RV.docs.find(x=>x.name===d.name);const imgs=pv&&pv.pages&&pv.pages.length?pv.pages:(PREVIEW[d.name]||[]);return imgs.length?imgs.map(src=>`<img loading="lazy" src="${src}">`).join(''):docText(d);})()}
       <label class="chk"><input type="checkbox" ${S.agreed[d.name]?'checked':''} onchange="S.agreed[docs()[${i}].name]=this.checked;updDocs()"><span>我已閱讀並同意簽署《${esc(d.name)}》</span></label></div></details>`).join('')}
     <button class="btn" id="docNext" onclick="go(4)">下一步：簽名</button><button class="btn ghost" onclick="go(2)">返回</button></div>`;
 }

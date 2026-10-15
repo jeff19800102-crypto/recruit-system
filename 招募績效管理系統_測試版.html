@@ -2248,7 +2248,7 @@ function ctSvcStatus(k){
   if(!list.length)return '';
   const c=list[0];
   const st=ctState(c);
-  return `${ctBadge(c)}${['sent','opened'].includes(st)?` <a href="javascript:ctCopy('${c.id}')" style="font-size:11px">複製</a>`:''}${['sent','opened','expired'].includes(st)?` <a href="javascript:ctResend('${c.id}')" style="font-size:11px">延長</a> <a href="javascript:ctVoid('${c.id}')" style="font-size:11px;color:#dc2626">作廢</a><div style="font-size:10px;color:#94a3b8">有效至 ${(c.expiresAt||'').slice(5,16).replace('T',' ')}</div>`:''}${c.status==='signed'&&c.pdfPath?` <a href="${ctPdfUrl(c)}" target="_blank" style="font-size:11px">📄 PDF</a>`:''}${c.status==='signed'&&c.opts?`<div style="font-size:10px;color:#475569;white-space:nowrap">健保 ${c.opts.健保||'—'}・勞退 ${c.opts.勞退||0}%</div>`:''}`;
+  return `${ctBadge(c)}${['sent','opened'].includes(st)?` <a href="javascript:ctCopy('${c.id}')" style="font-size:11px">複製</a>`:''}${['sent','opened','expired'].includes(st)?` <a href="javascript:ctResend('${c.id}')" style="font-size:11px">延長</a> <a href="javascript:ctVoid('${c.id}')" style="font-size:11px;color:#dc2626">作廢</a><div style="font-size:10px;color:#94a3b8">有效至 ${(c.expiresAt||'').slice(5,16).replace('T',' ')}</div>`:''}${['sent','opened','expired'].includes(st)?(c.review&&c.review.ready?` <a href="javascript:ctOpenReview('${c.id}')" style="font-size:11px">📑 ${c.review.total} 頁</a>`:c.reviewError?` <a href="javascript:ctPrepare(contracts.find(x=>x.id==='${c.id}'))" style="font-size:11px;color:#b91c1c">⚠ 文件未產生，重試</a>`:''):''}${c.status==='signed'&&c.pdfPath?` <a href="${ctPdfUrl(c)}" target="_blank" style="font-size:11px">📄 PDF</a>`:''}${c.status==='signed'&&c.opts?`<div style="font-size:10px;color:#475569;white-space:nowrap">健保 ${c.opts.健保||'—'}・勞退 ${c.opts.勞退||0}%</div>`:''}`;
 }
 function ctRefreshSvc(){document.querySelectorAll('[data-ctkey]').forEach(el=>{el.innerHTML=ctSvcStatus(decodeURIComponent(el.dataset.ctkey));});}
 function ctOpenFromPending(k){const p=(typeof pendingRecs!=='undefined'?pendingRecs:[])[k];if(p&&p.rec)ctOpenFromRec(p.rec);}
@@ -2278,6 +2278,7 @@ function ctOpenFromRec(r){
     const st=ctState(prev);
     const msgBox=st==='signed'?`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:10px">${ctBadge(prev)} <b>${prev.contractNo}</b> 已於 ${(prev.signedAt||'').replace('T',' ')} 簽署完成。${prev.pdfPath?`<a href="${ctPdfUrl(prev)}" target="_blank">📄 開啟 PDF</a>`:''}<br><span style="font-size:12px;color:#475569">如需重簽，請先在列表按「作廢」，再重新發送。</span></div>`
       :`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:10px">${ctBadge(prev)} <b>${prev.contractNo}</b>　發送 ${(prev.sentAt||'').replace('T',' ')}，連結有效至 ${(prev.expiresAt||'').replace('T',' ')}<br>
+        ${prev.review&&prev.review.ready?`<span style="font-size:12px;color:#15803d">✓ 審閱版 ${prev.review.docs.length} 份・${prev.review.total} 頁 <a href="javascript:ctOpenReview('${prev.id}')">📄 檢視</a></span>`:`<span style="font-size:12px;color:#b91c1c">⚠ 審閱版文件尚未產生 <a href="javascript:ctPrepare(contracts.find(x=>x.id==='${prev.id}'))">重新產生</a></span>`}<br>
         <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="ctCopy('${prev.id}')">📋 複製 LINE 訊息</button> <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ctResend('${prev.id}')">↻ 延長 2 天並複製</button>
         <div style="font-size:12px;color:#475569;margin-top:6px">下方資料已帶入。若條件有誤要重發：修改後按「產生簽約連結」，舊連結會自動作廢。</div></div>`;
     g('ctResult').innerHTML=msgBox;
@@ -2323,14 +2324,40 @@ async function ctCreate(){
     await batch.commit();
     c.id=id;
     if(t)await tlSave({...t,timeline:[...(t.timeline||[]),{at:tlNow(),type:'contract',by:tlStaff(),note:`發送線上簽約 ${c.contractNo}（${p.clientShort||''} ${c.job.職稱}）`}]}).catch(()=>{});
-    const msg=ctMessage(c);
-    document.getElementById('ctResult').innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px">
-      <b>已產生簽約連結</b>（${c.contractNo}，48 小時內有效）${c.pkgSnap?'':'<br><span style="color:#b91c1c">注意：這個簽約包沒有上傳 Word 範本，員工簽完不會產生 PDF。請先到「📁 簽約範本」建立並啟用簽約包。</span>'}<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${ctEsc(msg)}</textarea>
-      <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('ctMsg').value).then(()=>this.textContent='✓ 已複製，請貼到 LINE')">📋 複製 LINE 訊息</button></div>`;
     document.getElementById('ctSendBtn').style.display='none';
+    showLoading(false);
+    await ctPrepare(c);
     ctRefreshSvc();
   }catch(e){alert('建立失敗：'+(e.code||e.message)+'\n若為權限不足，需在 Firebase 主控台的 Firestore 規則加入「'+CT_COL+'」集合。');}
   finally{showLoading(false);}
+}
+// ── 發送時先產出審閱版文件（員工開啟連結直接看，不必等轉檔）──
+async function ctIdToken(){const u=auth.currentUser;if(!u)throw new Error('請重新登入');return u.getIdToken();}
+function ctResultBox(html){const el=document.getElementById('ctResult');if(el)el.innerHTML=html;}
+function ctMsgBox(c){return `<textarea id="ctMsg" rows="6" style="width:100%;margin-top:6px;font-size:13px">${ctEsc(ctMessage(c))}</textarea>
+      <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('ctMsg').value).then(()=>this.textContent='✓ 已複製，請貼到 LINE')">📋 複製 LINE 訊息</button>`;}
+function ctShowMsg(id){const c=contracts.find(x=>x.id===id);const el=document.getElementById('ctPrepBody');if(c&&el)el.insertAdjacentHTML('beforeend',ctMsgBox(c));}
+async function ctPrepare(c){
+  if(!c||!c.id)return;
+  const box=(body)=>`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-top:10px"><b>已產生簽約連結</b>（${ctEsc(c.contractNo||'')}，48 小時內有效）<div id="ctPrepBody" style="margin-top:6px">${body}</div></div>`;
+  ctResultBox(box('⏳ 正在產生審閱版文件（約 10–20 秒），請稍候…'));
+  try{
+    const r=await fetch(`${CT_SERVICE}/prepare`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await ctIdToken()},body:JSON.stringify({test:IS_TEST,token:c.id})});
+    const j=await r.json().catch(()=>({ok:false,error:'伺服器回應錯誤'}));
+    if(!j.ok)throw new Error(j.error||('HTTP '+r.status));
+    const rv=j.review;
+    ctResultBox(box(`<div style="color:#15803d;font-weight:600">✓ 文件已產生：${rv.docs.length} 份・共 ${rv.total} 頁　<a href="javascript:ctOpenReview('${c.id}')">📄 檢視審閱版 PDF</a></div>
+      <div style="font-size:12px;color:#475569;margin:4px 0">${rv.docs.map(d=>`${ctEsc(d.name)} ${d.pages} 頁`).join('、')}。請先確認版面正確，再把訊息貼給員工。</div>${ctMsgBox(c)}`));
+  }catch(e){
+    ctResultBox(box(`<div style="color:#b91c1c;font-weight:600">⚠ 審閱版文件產生失敗：${ctEsc(e.message)}</div>
+      <div style="font-size:12px;color:#475569;margin:4px 0">員工開啟連結會看到文字版內容。建議先按「重試」；若一直失敗，請檢查簽約範本的 Word 檔。</div>
+      <button class="btn btn-outline btn-sm" onclick="ctPrepare(contracts.find(x=>x.id==='${c.id}'))">↻ 重試</button> <button class="btn btn-outline btn-sm" onclick="ctShowMsg('${c.id}');this.remove()">仍要複製訊息</button>`));
+  }
+}
+async function ctOpenReview(id){
+  try{const r=await fetch(`${CT_SERVICE}/review?${IS_TEST?'test=1&':''}t=${id}&pdf=1`,{headers:{Authorization:'Bearer '+await ctIdToken()}});
+    if(!r.ok)throw new Error('HTTP '+r.status);const b=await r.blob();window.open(URL.createObjectURL(b),'_blank');}
+  catch(e){alert('無法開啟審閱版：'+e.message);}
 }
 function ctCopy(id){const c=contracts.find(x=>x.id===id);if(!c)return;navigator.clipboard.writeText(ctMessage(c)).then(()=>alert('已複製 LINE 訊息，請貼給員工。'));}
 async function ctResend(id){const ref=db.collection(CT_COL).doc(id);const d=await ref.get();const c=d.exists?{id,...d.data()}:null;if(!c)return;if(!['sent','opened'].includes(c.status)){alert('這份簽約已'+(c.status==='signed'?'簽署完成':'作廢')+'，無法延長。');return;}await ref.update({expiresAt:ctAddHours(48),expiresTs:firebase.firestore.Timestamp.fromMillis(Date.now()+48*3600e3)});c.expiresAt=ctAddHours(48);navigator.clipboard.writeText(ctMessage(c)).then(()=>alert(`已延長至 ${c.expiresAt.replace('T',' ')}，並複製 LINE 訊息。`));}
