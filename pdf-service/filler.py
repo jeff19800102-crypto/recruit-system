@@ -83,7 +83,7 @@ def put_signature(p, sig_png, height_cm=1.2, max_w_cm=4.0):
     _float_picture(r, h_cm, 1.1 - h_cm)   # 簽名底部約落在該行文字基線
     sz = rpr.find(qn('w:sz')) if rpr is not None else None
     ch_cm = (int(sz.get(qn('w:val'))) / 2 if sz is not None else 12) * 0.0353
-    tail = '\u3000' * (int(w_cm / ch_cm) + 1) + (after or '')   # 留出簽名寬度，後面文字不會被蓋住
+    tail = '\u3000' * (int(w_cm / ch_cm) + 1) + (after or '\u2060')   # 留出簽名寬度，後面文字不會被蓋住；結尾加「零寬連接字」避免靠右對齊時行尾空白被忽略而超出邊界
     r2 = p.add_run(tail)
     if rpr is not None: r2._r.insert(0, copy.deepcopy(rpr))
 
